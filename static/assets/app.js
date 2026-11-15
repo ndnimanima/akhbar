@@ -1670,7 +1670,7 @@
       const payload = {
         title: v.title,
         url: v.url,
-        icon: (S.draft && S.draft.icon) || v.icon || "📰",
+        icon: v.icon || "📰",
         color: (S.draft && S.draft.color) || "teal",
         show_url: tgVal(form, "show_url"),
         enabled: tgVal(form, "enabled"),
@@ -1701,7 +1701,7 @@
       return;
     }
     if (kind === "topic") {
-      const payload = { name: v.name, name_en: v.name_en, emoji: (S.draft && S.draft.emoji) || v.emoji, keywords: v.keywords, enabled: tgVal(form, "enabled") };
+      const payload = { name: v.name, name_en: v.name_en, emoji: v.emoji, keywords: v.keywords, enabled: tgVal(form, "enabled") };
       if (S.draft && S.draft.topicId) await api("/api/topics/" + S.draft.topicId, { method: "PATCH", body: payload });
       else await api("/api/topics", { method: "POST", body: payload });
       closeModal(); toast(t("common.ok"), "ok"); await render();
@@ -1828,6 +1828,23 @@
   /* ── actions ──────────────────────────────────────────────────────────── */
 
   const ACTIONS = {
+    "modal.close": () => closeModal(),
+    "modal.backdrop": () => closeModal(),
+    "submit": (el) => {
+      const form = document.getElementById(el.dataset.formId) || el.closest("form[data-form]");
+      if (form) return runForm(form);
+    },
+    "tg": (el) => {
+      const on = el.classList.toggle("on");
+      el.setAttribute("aria-pressed", on ? "true" : "false");
+    },
+    "mobile.toggle": (el) => {
+      const group = el.closest(".mgroup");
+      if (group) {
+        const open = group.classList.toggle("open");
+        el.setAttribute("aria-expanded", open ? "true" : "false");
+      }
+    },
     "nav.go": (el) => go(el.dataset.page),
     "lang.toggle": () => setLang(isFa() ? "en" : "fa"),
     "theme.toggle": () => setTheme(S.theme === "slate" ? "amber" : "slate"),
@@ -2144,31 +2161,46 @@
 
   /* ── event wiring ─────────────────────────────────────────────────────── */
 
+  const pendingForms = new WeakSet();
+  async function runForm(form) {
+    if (pendingForms.has(form)) return;
+    if (typeof form.reportValidity === "function" && !form.reportValidity()) return;
+    pendingForms.add(form);
+    try { await submitForm(form); }
+    finally { pendingForms.delete(form); }
+  }
+
+  function runAction(fn, el, ev) {
+    try { Promise.resolve(fn(el, ev)).catch((e) => toast(errMsg(e), "err")); }
+    catch (e) { toast(errMsg(e), "err"); }
+  }
+
   document.addEventListener("click", (ev) => {
     const el = ev.target.closest("[data-act]");
     if (!el) return;
     const name = el.dataset.act;
+    // Clicks inside the dialog must keep their native behavior. Only a direct
+    // click on the backdrop dismisses it; form controls use their change event.
+    if (name === "modal.backdrop" && ev.target !== el) return;
+    if (/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) return;
     const fn = ACTIONS[name];
     if (!fn) return;
-    if (el.tagName === "BUTTON" && !el.type) el.setAttribute("type", "button");
     ev.preventDefault();
-    try { fn(el, ev); } catch (e) { toast(errMsg(e), "err"); }
+    runAction(fn, el, ev);
   });
 
   document.addEventListener("change", (ev) => {
     const el = ev.target.closest("[data-act]");
     if (!el || !/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) return;
     const fn = ACTIONS[el.dataset.act];
-    if (fn) {
-      try { fn(el, ev); } catch (e) { toast(errMsg(e), "err"); }
-    }
+    if (fn) runAction(fn, el, ev);
   });
 
   document.addEventListener("submit", (ev) => {
     const form = ev.target.closest("form[data-form]");
     if (!form) return;
     ev.preventDefault();
-    submitForm(form).catch((e) => toast(errMsg(e), "err"));
+    runForm(form).catch((e) => toast(errMsg(e), "err"));
   });
 
   // hover-intent dropdowns on desktop
