@@ -32,7 +32,6 @@ import logging
 import re
 import shutil
 import struct
-import subprocess
 import tempfile
 from collections import Counter
 from datetime import datetime, timezone
@@ -49,8 +48,6 @@ logger = logging.getLogger("rozaneh.video")
 NO_TIMEOUT = httpx.Timeout(None)
 VIDEO_EXTS = (".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v", ".ogv")
 MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB size cap; time stays unlimited
-_PROBE_READ_LIMIT = 256 * 1024 * 1024  # read whole file up to this size…
-PROBE_WINDOW = 8 * 1024 * 1024  # …otherwise just the header window
 FRAME_COUNT = 6
 SMART_BATCH = 3
 
@@ -64,6 +61,18 @@ _WORD_RE = re.compile(r"[\w\u0600-\u06FF]+")
 
 _TASKS: dict[int, asyncio.Task] = {}
 _CANCELLED: set[int] = set()
+# A single analysis at a time per application process reduces concurrent
+# downloads, decoder memory and CPU on small hosts. There is no time limit.
+_ANALYSIS_LOOP: asyncio.AbstractEventLoop | None = None
+_ANALYSIS_LOCK: asyncio.Lock | None = None
+
+
+def _analysis_lock() -> asyncio.Lock:
+    global _ANALYSIS_LOOP, _ANALYSIS_LOCK
+    loop = asyncio.get_running_loop()
+    if _ANALYSIS_LOOP is not loop or _ANALYSIS_LOCK is None:
+        _ANALYSIS_LOOP, _ANALYSIS_LOCK = loop, asyncio.Lock()
+    return _ANALYSIS_LOCK
 
 
 class VideoError(RuntimeError):
@@ -159,30 +168,33 @@ def _og(html_text: str, keys: tuple[str, ...]) -> str:
     return ""
 
 
-async def _fetch_text(url: str, limit: int = 2_000_000) -> str:
-    """GET a page with **no timeout** — however long the server takes."""
+async def _fetch_text(url: str, limit: int = 2_000_000, *,
+                      accept: str = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8") -> str:
+    """Stream up to the requested number of characters with no deadline."""
     headers = {
         "User-Agent": config.USER_AGENT,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept": accept,
         "Accept-Language": "fa,en;q=0.8",
     }
     async with httpx.AsyncClient(timeout=NO_TIMEOUT, follow_redirects=True, headers=headers) as client:
-        response = await client.get(url)
-        if response.status_code >= 400:
-            raise VideoError(f"http_{response.status_code}")
-        return response.text[:limit]
+        async with client.stream("GET", url) as response:
+            if response.status_code >= 400:
+                raise VideoError(f"http_{response.status_code}")
+            parts: list[str] = []
+            remaining = max(0, limit)
+            async for chunk in response.aiter_text(chunk_size=16384):
+                parts.append(chunk[:remaining])
+                remaining -= min(len(chunk), remaining)
+                if not remaining:
+                    break
+            return "".join(parts)
 
 
 async def _fetch_json(url: str) -> dict:
-    async with httpx.AsyncClient(timeout=NO_TIMEOUT, follow_redirects=True,
-                                 headers={"User-Agent": config.USER_AGENT}) as client:
-        response = await client.get(url)
-        if response.status_code >= 400:
-            raise VideoError(f"http_{response.status_code}")
-        try:
-            return response.json()
-        except ValueError as exc:
-            raise VideoError("bad_json") from exc
+    try:
+        return json.loads(await _fetch_text(url, accept="*/*"))
+    except ValueError as exc:
+        raise VideoError("bad_json") from exc
 
 
 # ── captions ────────────────────────────────────────────────────────────────
@@ -388,10 +400,22 @@ async def _download(url: str, dest: Path, on_progress=None, should_stop=None) ->
     return total
 
 
-def _run(cmd: list[str]) -> tuple[str, str]:
-    """Run a subprocess with **no timeout** — ffmpeg/ffprobe take what they need."""
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    return proc.stdout or "", proc.stderr or ""
+async def _run(cmd: list[str]) -> str:
+    """Run without a deadline; terminate the child if its job is cancelled."""
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+    )
+    try:
+        stdout, _ = await proc.communicate()
+    except asyncio.CancelledError:
+        if proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+        await proc.wait()
+        raise
+    return stdout.decode("utf-8", errors="replace")
 
 
 async def _probe(path: Path | str, should_stop=None) -> dict:
@@ -399,8 +423,7 @@ async def _probe(path: Path | str, should_stop=None) -> dict:
     path = Path(path) if isinstance(path, str) else path
     if shutil.which("ffprobe"):
         try:
-            stdout, _ = await asyncio.to_thread(
-                _run,
+            stdout = await _run(
                 ["ffprobe", "-v", "quiet", "-print_format", "json",
                  "-show_format", "-show_streams", str(path)],
             )
@@ -436,64 +459,77 @@ async def _probe(path: Path | str, should_stop=None) -> dict:
 
 
 def _mp4_probe(path: Path) -> dict:
-    """Minimal MP4 box walker: ``mvhd`` duration, ``tkhd`` size, ``stsd`` codec."""
+    """Read MP4 metadata by seeking between boxes, without buffering video data.
+
+    Skipping media payloads keeps memory use small even when moov follows mdat.
+    Malformed or truncated boxes are ignored rather than read beyond their bounds.
+    """
     info = {"duration": 0.0, "width": 0, "height": 0, "fps": 0.0,
-            "video_codec": "", "audio_codec": "", "bitrate": 0}
+            "video_codec": "", "audio_codec": "", "bitrate": 0, "size": 0}
     try:
-        info["size"] = path.stat().st_size
-        if info["size"] <= _PROBE_READ_LIMIT:
-            data = path.read_bytes()
-        else:
-            # very large file: `moov` sits at the head when the file is
-            # faststart-encoded (the usual case for web video), so read a
-            # bounded window instead of loading gigabytes into memory.
-            with open(path, "rb") as fh:
-                data = fh.read(PROBE_WINDOW)
+        with open(path, "rb") as fh:
+            info["size"] = path.stat().st_size
+
+            def read_at(offset: int, length: int) -> bytes:
+                fh.seek(offset)
+                return fh.read(length)
+
+            def walk(start: int, end: int, depth: int = 0) -> None:
+                if depth > 6:
+                    return
+                pos = start
+                while pos + 8 <= end:
+                    header_bytes = read_at(pos, 8)
+                    if len(header_bytes) != 8:
+                        break
+                    size, kind_bytes = struct.unpack(">I4s", header_bytes)
+                    header = 8
+                    if size == 1:
+                        extended = read_at(pos + 8, 8) if pos + 16 <= end else b""
+                        if len(extended) != 8:
+                            break
+                        size = struct.unpack(">Q", extended)[0]
+                        header = 16
+                    elif size == 0:
+                        size = end - pos
+                    if size < header or size > end - pos:
+                        break
+                    body, box_end = pos + header, pos + size
+                    kind = kind_bytes.decode("latin1")
+                    if kind == "mvhd" and body + 20 <= box_end:
+                        version = read_at(body, 1)
+                        if version == b"\x01" and body + 32 <= box_end:
+                            raw = read_at(body + 20, 12)
+                            if len(raw) == 12:
+                                timescale, duration = struct.unpack(">IQ", raw)
+                                if timescale:
+                                    info["duration"] = duration / timescale
+                        elif version != b"\x01":
+                            raw = read_at(body + 12, 8)
+                            if len(raw) == 8:
+                                timescale, duration = struct.unpack(">II", raw)
+                                if timescale:
+                                    info["duration"] = duration / timescale
+                    elif kind == "tkhd" and body + 84 <= box_end:
+                        raw = read_at(body + 76, 8)
+                        if len(raw) == 8:
+                            width, height = struct.unpack(">II", raw)
+                            if width and height:
+                                info["width"], info["height"] = width >> 16, height >> 16
+                    elif kind == "stsd" and body + 16 <= box_end:
+                        codec = read_at(body + 12, 4).decode("latin1").strip()
+                        if codec in ("mp4a", "ac-3", "ec-3", "opus"):
+                            info["audio_codec"] = info["audio_codec"] or codec
+                        elif codec and not info["video_codec"]:
+                            info["video_codec"] = codec
+                    elif kind in ("moov", "trak", "mdia", "minf", "stbl"):
+                        walk(body, box_end, depth + 1)
+                    pos = box_end
+
+            walk(0, info["size"])
     except OSError:
-        info["size"] = 0
         return info
-
-    def boxes(start: int, end: int):
-        pos = start
-        while pos + 8 <= end:
-            size, kind = struct.unpack(">I4s", data[pos:pos + 8])
-            header = 8
-            if size == 1 and pos + 16 <= end:
-                size = struct.unpack(">Q", data[pos + 8:pos + 16])[0]
-                header = 16
-            elif size == 0:
-                size = end - pos
-            if size < header or pos + size > end:
-                break
-            yield kind.decode("latin1", "ignore"), pos + header, pos + size
-            pos += size
-
-    def walk(start: int, end: int, depth: int = 0) -> None:
-        if depth > 6:
-            return
-        for kind, body, box_end in boxes(start, end):
-            if kind == "mvhd" and body + 20 <= box_end:
-                if data[body] == 1 and body + 32 <= box_end:
-                    timescale, duration = struct.unpack(">IQ", data[body + 20:body + 32])
-                else:
-                    timescale, duration = struct.unpack(">II", data[body + 12:body + 20])
-                if timescale:
-                    info["duration"] = duration / timescale
-            elif kind == "tkhd" and body + 84 <= box_end:
-                width, height = struct.unpack(">II", data[body + 76:body + 84])
-                if width and height:
-                    info["width"], info["height"] = width >> 16, height >> 16
-            elif kind == "stsd" and body + 16 <= box_end:
-                codec = data[body + 12:body + 16].decode("latin1", "ignore").strip()
-                if codec in ("mp4a", "ac-3", "ec-3", "opus"):
-                    info["audio_codec"] = info["audio_codec"] or codec
-                elif codec and not info["video_codec"]:
-                    info["video_codec"] = codec
-            elif kind in ("moov", "trak", "mdia", "minf", "stbl"):
-                walk(body, box_end, depth + 1)
-
-    walk(0, len(data))
-    if info["duration"] and info.get("size"):
+    if info["duration"] and info["size"]:
         info["bitrate"] = int(info["size"] * 8 / info["duration"])
     return info
 
@@ -513,9 +549,9 @@ async def _extract_frames(source: str, duration: float, count: int = FRAME_COUNT
             if should_stop and should_stop():
                 break
             out = tmpdir / f"f{idx}.jpg"
-            await asyncio.to_thread(
-                _run,
-                ["ffmpeg", "-nostdin", "-y", "-ss", f"{stamp:.2f}", "-i", source,
+            await _run(
+                ["ffmpeg", "-nostdin", "-v", "error", "-y", "-threads", "1",
+                 "-ss", f"{stamp:.2f}", "-i", source, "-threads", "1",
                  "-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "4", str(out)],
             )
             if not out.exists() or out.stat().st_size == 0:
@@ -671,6 +707,16 @@ def build_caption(report: dict) -> str:
 async def analyse(url: str, *, title_hint: str = "", transcript_hint: str = "",
                   local_file: str | None = None, on_progress=None,
                   should_stop=None) -> dict:
+    """Queue analyses per process without imposing a deadline."""
+    async with _analysis_lock():
+        return await _analyse(url, title_hint=title_hint, transcript_hint=transcript_hint,
+                              local_file=local_file, on_progress=on_progress,
+                              should_stop=should_stop)
+
+
+async def _analyse(url: str, *, title_hint: str = "", transcript_hint: str = "",
+                   local_file: str | None = None, on_progress=None,
+                   should_stop=None) -> dict:
     """Analyse one video. Runs as long as it needs — there is no timeout."""
     url = (url or "").strip()
     if not url and not transcript_hint and not local_file:
@@ -832,8 +878,15 @@ def get_job(job_id: int) -> dict | None:
     return row
 
 
-def list_jobs(limit: int = 30) -> list[dict]:
-    rows = db.query("SELECT * FROM video_analyses ORDER BY id DESC LIMIT ?", (min(limit, 100),))
+def list_jobs(limit: int = 30, *, brief: bool = False) -> list[dict]:
+    limit = max(1, min(limit, 100))
+    if brief:
+        # Exclude large JSON reports, transcripts and base64 frames from polls.
+        return db.query(
+            "SELECT id, url, title, status, mode, stage, error, created_at, finished_at "
+            "FROM video_analyses ORDER BY id DESC LIMIT ?", (limit,),
+        )
+    rows = db.query("SELECT * FROM video_analyses ORDER BY id DESC LIMIT ?", (limit,))
     for row in rows:
         row["report"] = json.loads(row.get("report") or "{}")
     return rows
@@ -883,13 +936,22 @@ def start_analysis(url: str, *, title_hint: str = "", transcript_hint: str = "",
             logger.exception("video analysis %s failed", job_id)
             _set_job(job_id, status="failed", stage="failed", error=str(exc)[:500],
                      finished_at=_now())
+
+    def finished(task: asyncio.Task) -> None:
+        # This callback also runs if a job is cancelled before runner starts.
+        try:
+            if task.cancelled():
+                _set_job(job_id, status="cancelled", stage="cancelled", error="cancelled",
+                         finished_at=_now())
         finally:
             _TASKS.pop(job_id, None)
             _CANCELLED.discard(job_id)
             if cleanup_dir:
                 shutil.rmtree(cleanup_dir, ignore_errors=True)
 
-    _TASKS[job_id] = asyncio.create_task(runner(), name=f"video-{job_id}")
+    task = asyncio.create_task(runner(), name=f"video-{job_id}")
+    _TASKS[job_id] = task
+    task.add_done_callback(finished)
     return job_id
 
 
@@ -915,9 +977,14 @@ def pending_video_urls(limit: int = SMART_BATCH) -> list[dict]:
     rows = db.query(
         "SELECT link, title FROM items WHERE link LIKE '%http%' ORDER BY id DESC LIMIT 400"
     )
-    seen = set()
-    for row in db.query("SELECT url FROM video_analyses"):
-        seen.add(url_hash(row["url"]))
+    # Only query analyses corresponding to this batch instead of loading the
+    # entire video history into memory on every smart scheduler tick.
+    links = list({(row.get("link") or "").strip() for row in rows if row.get("link")})
+    seen: set[str] = set()
+    if links:
+        marks = ",".join("?" for _ in links)
+        for row in db.query(f"SELECT url FROM video_analyses WHERE trim(url) IN ({marks})", links):
+            seen.add(url_hash(row["url"]))
     out: list[dict] = []
     for row in rows:
         link = (row.get("link") or "").strip()
