@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Byte-compile sources
+        run: python -m compileall -q app main.py
+
+      - name: Frontend syntax + assets
+        run: |
+          node --check static/assets/app.js
+          node --check static/assets/i18n.js
+          for f in static/index.html static/login.html static/assets/style.css static/assets/logo.svg; do
+            test -s "$f" || { echo "missing $f"; exit 1; }
+          done
+
+      - name: Version is consistent everywhere
+        run: |
+          python - <<'PY'
+          import re, pathlib
+          version = re.search(r'VERSION = "([\d.]+)"', pathlib.Path("app/config.py").read_text()).group(1)
+          for page in ("static/index.html", "static/login.html"):
+              html = pathlib.Path(page).read_text()
+              assert f"?v={version}" in html, f"{page} does not cache-bust assets with ?v={version}"
+          print("version", version, "is wired through both pages")
+          PY
+
+      - name: Messenger rules are declared
+        run: |
+          python - <<'PY'
+          from app import publish
+          for pid in ("telegram", "bale", "eitaa", "rubika", "webhook"):
+              rule = publish.PLATFORM_RULES[pid]
+              assert rule["text"] > 0 and rule["min_interval"] >= 0
+          assert publish.PLATFORM_RULES["telegram"]["caption"] == 1024
+          assert publish.PLATFORM_RULES["telegram"]["text"] == 4096
+          assert publish.PLATFORM_RULES["eitaa"]["photo"] == "upload"
+          print("platform rules ok")
+          PY
+
+      - name: Import the ASGI app (smoke test)
+        env:
+          DATA_DIR: ./.ci-data
+        run: |
+          python - <<'PY'
+          from app.main import app
+          from app import scheduler
+          routes = {r.path for r in app.routes}
+          for path in ("/healthz", "/api/feeds", "/api/jobs", "/api/dashboard"):
+              assert path in routes, f"missing route {path}"
+          # scheduler logic must be pure and predictable
+          job = {"enabled": 1, "schedule_times": '["08:00","20:30"]', "interval_minutes": 0, "last_run": ""}
+          assert scheduler.parse_times(job["schedule_times"]) == [(8, 0), (20, 30)]
+          assert scheduler.next_run(job) is not None
+          print("smoke test ok")
+          PY
