@@ -8,7 +8,7 @@ window.scrollTo = () => {};
 const calls = [];
 let cfg = { smart: false, interval_minutes: 30, ai_base_url: 'https://api.openai.com/v1', ai_model: 'gpt-4o-mini', ai_key_set: false, ai_vision: false };
 window.fetch = async (url, init) => {
-  calls.push({url, method: init.method, body: init.body && JSON.parse(init.body)});
+  calls.push({url, method: init.method, body: typeof init.body === 'string' ? JSON.parse(init.body) : init.body});
   let result = {};
   if (url === '/api/meta') result = {authenticated: true, defaults: {}, platforms: []};
   else if (url === '/api/video/status') result = {settings: cfg, ffmpeg: true};
@@ -18,6 +18,7 @@ window.fetch = async (url, init) => {
     cfg = {...cfg, ai_base_url:b.base_url, ai_model:b.model, ai_vision:b.vision, ai_key_set:b.clear_key ? false : !!b.api_key || cfg.ai_key_set};
     result = {ok:true, settings:cfg};
   } else if (url === '/api/video/analyze') result = {ok:true, job_id:9};
+  else if (url.startsWith('/api/video/upload?')) result = {ok:true, job_id:10};
   else if (url === '/api/video/settings') { cfg = {...cfg, ...JSON.parse(init.body)}; result = {ok:true, settings:cfg}; }
   else if (url === '/api/video/ai-test') result = {ok:true};
   else throw new Error('Unexpected ' + url);
@@ -53,6 +54,13 @@ const q = s => {const el = document.querySelector(s); assert.ok(el, s); return e
   await waitFor(() => cfg.smart && document.querySelector('[data-act="video.aiClear"]'));
   assert.ok(cfg.ai_key_set);
   await tick(); await tick();
+  const upload = q('#videoFile');
+  Object.defineProperty(upload, 'files', {value: [new window.File(['video'], 'sample.mp4', {type:'video/mp4'})]});
+  upload.dispatchEvent(new window.Event('change', {bubbles:true}));
+  await waitFor(() => calls.some(c => c.url.startsWith('/api/video/upload?')));
+  await tick(); await tick();
+  assert.equal(window.Rozaneh.state.video.activeJob, 10);
+  assert.ok(!document.querySelector('#toasts').textContent.includes('render is not defined'));
   console.log('video settings and quick analysis UI OK');
   dom.window.close();
 })().catch(e => {console.error(e); dom.window.close(); process.exitCode=1;});

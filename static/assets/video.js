@@ -301,7 +301,7 @@ async function uploadVideo() {
     const data = await res.json().catch(() => null);
     if (!res.ok) throw new Error((data && data.detail) || "unknown");
     state.video.activeJob = data.job_id;
-    await loadVideo(); await render(); pollVideo();
+    await reload(); pollVideo();
   } catch (e) { toast(errMsg(e), "err"); }
 }
 
