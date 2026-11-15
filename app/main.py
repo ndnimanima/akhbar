@@ -212,6 +212,15 @@ class VideoSettingsPayload(BaseModel):
     frames: bool | None = None
 
 
+class VideoAISettingsPayload(BaseModel):
+    provider: str | None = None
+    base_url: str = "https://api.openai.com/v1"
+    model: str = "gpt-4o-mini"
+    api_key: str = ""
+    clear_key: bool = False
+    vision: bool = False
+
+
 # ── helpers ─────────────────────────────────────────────────────────────────
 
 
@@ -302,7 +311,7 @@ def clean_schedule(value: str | list[str] | None) -> str:
     return db.dump(sorted(cleaned))
 
 
-SECRET_SETTINGS = {"password_hash", "password_salt", "deepseek_api_key", "openai_api_key"}
+SECRET_SETTINGS = {"password_hash", "password_salt", "deepseek_api_key", "openai_api_key", "video_ai_api_key"}
 
 
 def settings_public() -> dict:
@@ -1127,6 +1136,10 @@ async def admin_import(payload: ImportPayload, _: None = auth) -> dict:
         for key, value in data["settings"].items():
             if key in SECRET_SETTINGS:
                 continue
+            # Backups omit secrets. Do not redirect an existing video API key
+            # to a different endpoint or protocol when restoring a backup.
+            if key in {"video_ai_provider", "video_ai_base_url"} and db.get_setting("video_ai_api_key"):
+                continue
             db.set_setting(key, str(value))
     db.log(None, "settings imported", level="admin", code="import_done")
     return {"ok": True, "imported": imported}
@@ -1201,6 +1214,26 @@ async def video_settings(_: None = auth) -> dict:
 async def patch_video_settings(payload: VideoSettingsPayload, _: None = auth) -> dict:
     patch = payload.model_dump(exclude_unset=True)
     return {"ok": True, "settings": video_mod.set_settings(patch)}
+
+
+@app.put("/api/video/ai-settings")
+async def put_video_ai_settings(payload: VideoAISettingsPayload, _: None = auth) -> dict:
+    try:
+        result = video_mod.set_ai_settings(payload.base_url, payload.model, payload.api_key,
+                                           clear_key=payload.clear_key, vision=payload.vision,
+                                           provider=payload.provider)
+    except video_mod.VideoError as exc:
+        fail(str(exc))
+    return {"ok": True, "settings": result}
+
+
+@app.post("/api/video/ai-test")
+async def video_ai_test(_: None = auth) -> dict:
+    try:
+        await video_mod.test_ai_connection()
+    except video_mod.VideoError as exc:
+        fail(str(exc))
+    return {"ok": True}
 
 
 @app.post("/api/video/analyze")

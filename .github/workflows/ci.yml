@@ -35,6 +35,9 @@ jobs:
           node --check static/assets/i18n.js
           node --check static/assets/video.js
           node tests/test_video_poll.cjs
+          npm install --prefix "$RUNNER_TEMP/akhbar-js-tests" --no-save --no-package-lock jsdom@26.1.0
+          NODE_PATH="$RUNNER_TEMP/akhbar-js-tests/node_modules" node tests/test_modal.cjs
+          NODE_PATH="$RUNNER_TEMP/akhbar-js-tests/node_modules" node tests/test_video_settings.cjs
           for f in static/index.html static/login.html static/assets/style.css static/assets/logo.svg; do
             test -s "$f" || { echo "missing $f"; exit 1; }
           done

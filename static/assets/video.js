@@ -11,6 +11,12 @@ const {
   toggleEl, emptyBox, fmtDate, fmtLogTime, ICO_CHEV, state, reload, fd,
 } = window.Rozaneh;
 
+const AI_PRESETS = {
+  openai_compatible: { base: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  gemini: { base: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.5-flash' },
+  anthropic: { base: 'https://api.anthropic.com/v1', model: 'claude-sonnet-4-5' },
+};
+
 const VIDEO_SRC_KEY = {
   youtube: "video.source_youtube", vimeo: "video.source_vimeo", direct: "video.source_direct",
   page: "video.source_page", upload: "video.source_upload", unknown: "video.source_unknown",
@@ -80,12 +86,15 @@ function reportBody(r) {
         "<div class=\"vhero-txt\">" +
           '<div class="inline tiny mute" style="gap:8px"><span class="chip">' + h(t(VIDEO_SRC_KEY[r.source] || "video.source_unknown")) + "</span>" +
           (r.author ? "<span>" + h(r.author) + "</span>" : "") +
-          (r.summary_engine === "llm" ? '<span class="chip ok">' + ico("sparkles") + " LLM</span>" : '<span class="chip">' + ico("list") + " extractive</span>") + "</div>" +
+          (r.summary_engine === "llm" || r.summary_engine === "video_ai" ? '<span class="chip ok">' + ico("sparkles") + " AI</span>" : '<span class="chip">' + ico("list") + " extractive</span>") + "</div>" +
           "<h3>" + h(r.title || "—") + "</h3>" +
           (r.description ? '<p class="vdesc">' + h(r.description.slice(0, 260)) + (r.description.length > 260 ? "…" : "") + "</p>" : "") +
         "</div>" +
       "</div>" +
       '<div class="vmetrics">' + meta + "</div>" +
+      (r.ai_evidence ? '<div class="vevidence">' + ico("info") + '<span>' +
+        h(t("video.evidence_" + r.ai_evidence.source)) + ' · ' + h(t("video.evidence_parts")) + ': ' + num(r.ai_evidence.segments) +
+        ' · ' + h(t("video.evidence_frames")) + ': ' + num(r.ai_evidence.frames_sent) + '</span></div>' : '') +
       (r.summary ? '<section class="vblock"><h4>' + ico("sparkles") + h(t("video.summary")) + "</h4><p class=\"vsummary\">" + h(r.summary) + "</p>" +
         '<div class="inline"><button class="btn ghost sm" data-act="video.copy">' + ico("code") + "<span>" + h(t("video.copy_caption")) + "</span></button></div>" +
         '<pre class="vcap" id="videoCaption">' + h(r.caption || "") + "</pre></section>" : "") +
@@ -170,6 +179,26 @@ async function renderVideo(view) {
         "</select>" +
         (cfg.last_smart_run ? '<span class="chip">' + ico("clock") + h(fmtLogTime(cfg.last_smart_run)) + "</span>" : "") +
       "</div>" +
+      '<div class="vsmart-section"><div class="vsection-title"><div><b>' + h(t("video.ai_title")) + '</b><p>' + h(t("video.ai_hint")) + '</p></div>' +
+        '<span class="chip ' + (cfg.ai_key_set ? 'ok' : 'warn') + '">' + h(t(cfg.ai_key_set ? 'video.key_set' : 'video.key_unset')) + '</span></div>' +
+        '<form data-form="video-ai-settings" id="videoAiSettings">' +
+          field(t("video.ai_provider"), '<select name="provider" data-act="video.aiProvider">' +
+            ['openai_compatible', 'gemini', 'anthropic'].map(p => '<option value="' + p + '"' + ((cfg.ai_provider || 'openai_compatible') === p ? ' selected' : '') + '>' + h(t('video.provider_' + p)) + '</option>').join('') + '</select>', t("video.protocol_hint")) +
+          field(t("video.ai_url"), '<input class="ltr" type="url" name="base_url" required dir="ltr" value="' + h(cfg.ai_base_url || 'https://api.openai.com/v1') + '">') +
+          '<div class="form-grid">' +
+            field(t("video.ai_model"), '<input class="ltr" type="text" name="model" required dir="ltr" value="' + h(cfg.ai_model || 'gpt-4o-mini') + '">') +
+            field(t("video.ai_key"), '<input class="ltr" type="password" name="api_key" dir="ltr" autocomplete="new-password" placeholder="' + h(t(cfg.ai_key_set ? 'video.key_keep' : 'video.key_enter')) + '">') +
+          '</div>' +
+          '<label class="vai-check"><input type="checkbox" name="vision"' + (cfg.ai_vision ? ' checked' : '') + '> <span>' + h(t("video.ai_vision")) + '</span></label>' +
+          '<div class="vai-actions"><button type="submit" class="btn primary sm" data-act="submit" data-form-id="videoAiSettings">' + h(t("video.ai_save")) + '</button>' +
+            '<button type="button" class="btn ghost sm" data-act="video.aiTest">' + h(t("video.ai_test")) + '</button>' +
+            (cfg.ai_key_set ? '<button type="button" class="btn ghost sm" data-act="video.aiClear">' + h(t("video.ai_clear")) + '</button>' : '') + '</div>' +
+        '</form></div>' +
+      '<div class="vsmart-section"><div class="vsection-title"><div><b>' + h(t("video.quick_title")) + '</b><p>' + h(t("video.quick_hint")) + '</p></div></div>' +
+        '<form data-form="video-quick" id="videoQuickForm" class="vquick">' +
+          '<input class="ltr" type="url" name="url" required dir="ltr" placeholder="https://www.youtube.com/watch?v=..." aria-label="' + h(t("video.url")) + '">' +
+          '<button type="submit" class="btn primary" data-act="submit" data-form-id="videoQuickForm">' + ico("play") + '<span>' + h(t("video.analyze")) + '</span></button>' +
+        '</form><p class="vai-note">' + h(t("video.ai_limits")) + '</p></div>' +
     "</div>";
 
   const manualCard =
@@ -280,7 +309,7 @@ async function uploadVideo() {
     const data = await res.json().catch(() => null);
     if (!res.ok) throw new Error((data && data.detail) || "unknown");
     state.video.activeJob = data.job_id;
-    await loadVideo(); await render(); pollVideo();
+    await reload(); pollVideo();
   } catch (e) { toast(errMsg(e), "err"); }
 }
 
@@ -308,6 +337,24 @@ async function uploadVideo() {
       reload();
     },
     "video.refresh": async () => { await loadVideo(); await reload(); },
+    "video.aiProvider": (el) => {
+      const preset = AI_PRESETS[el.value], form = el.closest('form');
+      if (preset && form) {
+        form.elements.base_url.value = preset.base;
+        form.elements.model.value = preset.model;
+      }
+    },
+    "video.aiTest": async () => {
+      try { await api("/api/video/ai-test", { method: "POST" }); toast(t("video.ai_test_ok"), "ok"); }
+      catch (e) { toast(errMsg(e), "err"); }
+    },
+    "video.aiClear": () => confirmModal(t("video.ai_clear_confirm"), async () => {
+      const cfg = state.video.settings || {};
+      await api("/api/video/ai-settings", { method: "PUT", body: {
+        provider: cfg.ai_provider || 'openai_compatible', base_url: cfg.ai_base_url, model: cfg.ai_model, vision: !!cfg.ai_vision, clear_key: true,
+      }});
+      toast(t("video.ai_cleared"), "ok"); await reload();
+    }),
     "video.cancel": async (el) => {
       try {
         await api("/api/video/cancel/" + el.dataset.id, { method: "POST" });
@@ -336,6 +383,33 @@ async function uploadVideo() {
       } catch (e) { toast(errMsg(e), "err"); }
     },
   });
+  window.Rozaneh.forms["video-ai-settings"] = async (form) => {
+    const v = fd(form);
+    try {
+      const r = await api("/api/video/ai-settings", { method: "PUT", body: {
+        provider: v.provider, base_url: v.base_url, model: v.model, api_key: v.api_key || "", vision: !!form.elements.vision.checked,
+      }});
+      state.video.settings = r.settings;
+      form.elements.api_key.value = "";
+      toast(t("video.ai_saved"), "ok"); await reload();
+    } catch (e) { toast(errMsg(e), "err"); }
+  };
+  window.Rozaneh.forms["video-quick"] = async (form) => {
+    const v = fd(form);
+    try {
+      const parsed = new URL(v.url);
+      const host = parsed.hostname.toLowerCase();
+      const id = host.endsWith('youtu.be') ? parsed.pathname.slice(1).split('/')[0] :
+        parsed.pathname === '/watch' ? parsed.searchParams.get('v') :
+        (parsed.pathname.match(/^\/(?:shorts|embed|live)\/([\w-]+)/) || [])[1];
+      if (!['http:', 'https:'].includes(parsed.protocol) || !['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be', 'www.youtu.be'].includes(host) || !/^[\w-]{6,20}$/.test(id || '')) {
+        toast(t("video.quick_invalid"), "err"); return;
+      }
+      const r = await api("/api/video/analyze", { method: "POST", body: { url: v.url, mode: "manual" } });
+      form.reset(); state.video.activeJob = r.job_id;
+      await reload(); pollVideo(); toast(t("video.analysing"), "info");
+    } catch (e) { toast(errMsg(e), "err"); }
+  };
   window.Rozaneh.forms.video = async (form) => {
     const v = fd(form);
     const payload = { url: v.url || "", title: v.title || "", transcript: v.transcript || "", mode: "manual" };
