@@ -39,6 +39,7 @@ jobs:
           NODE_PATH="$RUNNER_TEMP/akhbar-js-tests/node_modules" node tests/test_modal.cjs
           NODE_PATH="$RUNNER_TEMP/akhbar-js-tests/node_modules" node tests/test_video_settings.cjs
           NODE_PATH="$RUNNER_TEMP/akhbar-js-tests/node_modules" node tests/test_video_history.cjs
+          NODE_PATH="$RUNNER_TEMP/akhbar-js-tests/node_modules" node tests/test_feed_logs_ui.cjs
           NODE_PATH="$RUNNER_TEMP/akhbar-js-tests/node_modules" node tests/test_creators_catalog.cjs
           for f in static/index.html static/login.html static/assets/style.css static/assets/logo.svg; do
             test -s "$f" || { echo "missing $f"; exit 1; }

@@ -62,6 +62,33 @@ if config.STATIC_DIR.exists():
 
 auth = Depends(security.require_auth)
 
+# Record only selected management actions, never payloads, URL parameters or
+# credentials. Pipeline/video events are logged separately with their outcome.
+_AUDIT_ROUTES = {
+    "/api/feeds", "/api/feeds/bulk", "/api/feeds/reorder", "/api/feeds/{feed_id}",
+    "/api/topics", "/api/topics/{topic_id}",
+    "/api/destinations", "/api/destinations/{destination_id}",
+    "/api/jobs", "/api/jobs/{job_id}", "/api/items/{item_id}",
+    "/api/items/clear", "/api/settings", "/api/creators", "/api/admin/sessions",
+    "/api/admin/archive/clear", "/api/video/settings", "/api/video/ai-settings",
+    "/api/video/analyze", "/api/video/upload", "/api/video/cancel/{job_id}",
+    "/api/video/analyses/{job_id}",
+}
+
+
+@app.middleware("http")
+async def audit_management_actions(request: Request, call_next):
+    response = await call_next(request)
+    route = request.scope.get("route")
+    template = getattr(route, "path", "")
+    if request.method in {"POST", "PATCH", "PUT", "DELETE"} and template in _AUDIT_ROUTES and 200 <= response.status_code < 300:
+        try:
+            db.log(None, f"{request.method} {template} (HTTP {response.status_code})", level="admin", code="management_action")
+        except Exception:
+            # Logging failure must not turn a successful write into a duplicate retry.
+            logger.warning("Could not record management action")
+    return response
+
 
 def fail(code: str, status: int = 400) -> None:
     """Raise a localisable, machine-readable error."""
@@ -686,12 +713,14 @@ async def check_feed(feed_id: int, _: None = auth) -> dict:
             "UPDATE feeds SET last_checked = ?, last_status = ? WHERE id = ?",
             (db.now_iso(), f"error: {exc}"[:200], feed_id),
         )
+        db.log(None, f"Source #{feed_id} check failed", level="warn", code="feed_check_failed")
         return {"ok": False, "error": str(exc)}
     window = [it for it in items if feeds.within_window(it, 24)]
     db.execute(
         "UPDATE feeds SET last_checked = ?, last_status = ?, last_count = ? WHERE id = ?",
         (db.now_iso(), "ok", len(window), feed_id),
     )
+    db.log(None, f"Source #{feed_id} checked: {len(items)} items, {len(window)} recent", code="feed_check_ok")
     return {
         "ok": True,
         "total": len(items),
@@ -1010,7 +1039,7 @@ async def clear_items(_: None = auth) -> dict:
 
 @app.get("/api/logs")
 async def list_logs(limit: int = 80, _: None = auth) -> dict:
-    return {"logs": db.query("SELECT * FROM logs ORDER BY id DESC LIMIT ?", (min(limit, 300),))}
+    return {"logs": db.query("SELECT * FROM logs ORDER BY id DESC LIMIT ?", (max(1, min(limit, 300)),))}
 
 
 @app.get("/api/dashboard")
