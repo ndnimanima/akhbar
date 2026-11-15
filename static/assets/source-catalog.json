@@ -1,0 +1,787 @@
+{
+  "categories": [
+    {
+      "id": "politics",
+      "title_fa": "سیاست و حکومت",
+      "title_en": "Politics & Government",
+      "sources": [
+        {
+          "name": "Politico",
+          "url": "https://www.politico.com/"
+        },
+        {
+          "name": "The Hill",
+          "url": "https://thehill.com/"
+        },
+        {
+          "name": "Reuters",
+          "url": "https://www.reuters.com/"
+        },
+        {
+          "name": "Associated Press (AP)",
+          "url": "https://apnews.com/"
+        },
+        {
+          "name": "BBC News Politics",
+          "url": "https://www.bbc.com/news/politics"
+        },
+        {
+          "name": "The New York Times Politics",
+          "url": "https://www.nytimes.com/section/politics"
+        },
+        {
+          "name": "Washington Post Politics",
+          "url": "https://www.washingtonpost.com/politics/"
+        },
+        {
+          "name": "CNN Politics",
+          "url": "https://www.cnn.com/politics"
+        },
+        {
+          "name": "Fox News Politics",
+          "url": "https://www.foxnews.com/politics"
+        },
+        {
+          "name": "Al Jazeera",
+          "url": "https://www.aljazeera.com/"
+        },
+        {
+          "name": "Axios",
+          "url": "https://www.axios.com/"
+        },
+        {
+          "name": "NPR Politics",
+          "url": "https://www.npr.org/sections/politics"
+        },
+        {
+          "name": "The Guardian US Politics",
+          "url": "https://www.theguardian.com/us-news/us-politics"
+        },
+        {
+          "name": "CBS News Politics",
+          "url": "https://www.cbsnews.com/politics/"
+        },
+        {
+          "name": "ABC News Politics",
+          "url": "https://abcnews.go.com/Politics"
+        },
+        {
+          "name": "NBC News Politics",
+          "url": "https://www.nbcnews.com/politics"
+        },
+        {
+          "name": "Wall Street Journal Politics",
+          "url": "https://www.wsj.com/politics"
+        },
+        {
+          "name": "Bloomberg Politics",
+          "url": "https://www.bloomberg.com/politics"
+        },
+        {
+          "name": "Foreign Policy",
+          "url": "https://foreignpolicy.com/"
+        },
+        {
+          "name": "ProPublica",
+          "url": "https://www.propublica.org/"
+        }
+      ]
+    },
+    {
+      "id": "ai",
+      "title_fa": "هوش مصنوعی",
+      "title_en": "Artificial Intelligence (AI)",
+      "sources": [
+        {
+          "name": "TechCrunch AI",
+          "url": "https://techcrunch.com/category/artificial-intelligence/"
+        },
+        {
+          "name": "MIT Technology Review",
+          "url": "https://www.technologyreview.com/"
+        },
+        {
+          "name": "The Verge AI",
+          "url": "https://www.theverge.com/ai-artificial-intelligence"
+        },
+        {
+          "name": "VentureBeat AI",
+          "url": "https://venturebeat.com/category/ai/"
+        },
+        {
+          "name": "Ars Technica",
+          "url": "https://arstechnica.com/"
+        },
+        {
+          "name": "WIRED AI",
+          "url": "https://www.wired.com/tag/artificial-intelligence/"
+        },
+        {
+          "name": "IEEE Spectrum",
+          "url": "https://spectrum.ieee.org/"
+        },
+        {
+          "name": "MarkTechPost",
+          "url": "https://www.marktechpost.com/"
+        },
+        {
+          "name": "Artificial Intelligence News",
+          "url": "https://www.artificialintelligence-news.com/"
+        },
+        {
+          "name": "The Decoder",
+          "url": "https://the-decoder.com/"
+        },
+        {
+          "name": "Synced Review",
+          "url": "https://syncedreview.com/"
+        },
+        {
+          "name": "AI Business",
+          "url": "https://aibusiness.com/"
+        },
+        {
+          "name": "OpenAI Blog",
+          "url": "https://openai.com/blog/"
+        },
+        {
+          "name": "Anthropic News",
+          "url": "https://www.anthropic.com/news"
+        },
+        {
+          "name": "Google DeepMind Blog",
+          "url": "https://deepmind.google/discover/blog/"
+        },
+        {
+          "name": "KnowEntry AI Aggregator",
+          "url": "https://knowentry.com/"
+        },
+        {
+          "name": "AI News Hub",
+          "url": "https://aienews.org/"
+        },
+        {
+          "name": "The AI News",
+          "url": "https://www.the-ai.news/en/"
+        },
+        {
+          "name": "AInformed",
+          "url": "https://www.ainformed.dev/"
+        },
+        {
+          "name": "Import AI (Jack Clark)",
+          "url": "https://importai.substack.com/"
+        }
+      ]
+    },
+    {
+      "id": "crime",
+      "title_fa": "حوادث و جرائم",
+      "title_en": "Crime, Accidents & Breaking Incidents",
+      "sources": [
+        {
+          "name": "Court TV",
+          "url": "https://www.courttv.com/"
+        },
+        {
+          "name": "Law & Crime",
+          "url": "https://lawandcrime.com/"
+        },
+        {
+          "name": "InSight Crime",
+          "url": "https://insightcrime.org/"
+        },
+        {
+          "name": "CNN",
+          "url": "https://www.cnn.com/"
+        },
+        {
+          "name": "Associated Press",
+          "url": "https://apnews.com/"
+        },
+        {
+          "name": "BBC News",
+          "url": "https://www.bbc.com/news"
+        },
+        {
+          "name": "Reuters",
+          "url": "https://www.reuters.com/"
+        },
+        {
+          "name": "ABC News",
+          "url": "https://abcnews.go.com/"
+        },
+        {
+          "name": "NBC News",
+          "url": "https://www.nbcnews.com/"
+        },
+        {
+          "name": "CBS News",
+          "url": "https://www.cbsnews.com/"
+        },
+        {
+          "name": "Fox News",
+          "url": "https://www.foxnews.com/"
+        },
+        {
+          "name": "The New York Times",
+          "url": "https://www.nytimes.com/"
+        },
+        {
+          "name": "The Guardian",
+          "url": "https://www.theguardian.com/"
+        },
+        {
+          "name": "Sky News",
+          "url": "https://news.sky.com/"
+        },
+        {
+          "name": "USA Today",
+          "url": "https://www.usatoday.com/"
+        },
+        {
+          "name": "Daily Mail",
+          "url": "https://www.dailymail.co.uk/"
+        },
+        {
+          "name": "Independent",
+          "url": "https://www.independent.co.uk/"
+        },
+        {
+          "name": "Newsweek",
+          "url": "https://www.newsweek.com/"
+        },
+        {
+          "name": "The Hill",
+          "url": "https://thehill.com/"
+        },
+        {
+          "name": "Axios",
+          "url": "https://www.axios.com/"
+        }
+      ]
+    },
+    {
+      "id": "beauty",
+      "title_fa": "زیبایی و آرایشی",
+      "title_en": "Beauty & Cosmetics",
+      "sources": [
+        {
+          "name": "Cosmetics Business",
+          "url": "https://www.cosmeticsbusiness.com/"
+        },
+        {
+          "name": "Premium Beauty News",
+          "url": "https://www.premiumbeautynews.com/"
+        },
+        {
+          "name": "Global Cosmetics News",
+          "url": "https://www.globalcosmeticsnews.com/"
+        },
+        {
+          "name": "NewBeauty",
+          "url": "https://www.newbeauty.com/"
+        },
+        {
+          "name": "WWD Beauty",
+          "url": "https://wwd.com/beauty-industry-news/"
+        },
+        {
+          "name": "Allure",
+          "url": "https://www.allure.com/"
+        },
+        {
+          "name": "Byrdie",
+          "url": "https://www.byrdie.com/"
+        },
+        {
+          "name": "Glamour Beauty",
+          "url": "https://www.glamour.com/beauty"
+        },
+        {
+          "name": "Vogue Beauty",
+          "url": "https://www.vogue.com/beauty"
+        },
+        {
+          "name": "Elle Beauty",
+          "url": "https://www.elle.com/beauty/"
+        },
+        {
+          "name": "Harper's Bazaar Beauty",
+          "url": "https://www.harpersbazaar.com/beauty/"
+        },
+        {
+          "name": "Cosmopolitan Beauty",
+          "url": "https://www.cosmopolitan.com/style-beauty/"
+        },
+        {
+          "name": "Beauty Independent",
+          "url": "https://www.beautyindependent.com/"
+        },
+        {
+          "name": "GCI Magazine",
+          "url": "https://www.gcimagazine.com/"
+        },
+        {
+          "name": "Fashion Network Beauty",
+          "url": "https://us.fashionnetwork.com/news/beauty,20.html"
+        },
+        {
+          "name": "Refinery29 Beauty",
+          "url": "https://www.refinery29.com/en-us/beauty"
+        },
+        {
+          "name": "Into The Gloss",
+          "url": "https://intothegloss.com/"
+        },
+        {
+          "name": "Temptalia",
+          "url": "https://www.temptalia.com/"
+        },
+        {
+          "name": "Makeup.com",
+          "url": "https://www.makeup.com/"
+        },
+        {
+          "name": "Sephora Beauty News",
+          "url": "https://www.sephora.com/beauty/beauty-news"
+        }
+      ]
+    },
+    {
+      "id": "technology",
+      "title_fa": "فناوری",
+      "title_en": "Technology (General)",
+      "sources": [
+        {
+          "name": "The Verge",
+          "url": "https://www.theverge.com/"
+        },
+        {
+          "name": "TechCrunch",
+          "url": "https://techcrunch.com/"
+        },
+        {
+          "name": "Ars Technica",
+          "url": "https://arstechnica.com/"
+        },
+        {
+          "name": "WIRED",
+          "url": "https://www.wired.com/"
+        },
+        {
+          "name": "CNET",
+          "url": "https://www.cnet.com/"
+        },
+        {
+          "name": "Engadget",
+          "url": "https://www.engadget.com/"
+        },
+        {
+          "name": "Tom's Hardware",
+          "url": "https://www.tomshardware.com/"
+        },
+        {
+          "name": "9to5Mac",
+          "url": "https://9to5mac.com/"
+        },
+        {
+          "name": "Mashable",
+          "url": "https://mashable.com/"
+        },
+        {
+          "name": "ZDNet",
+          "url": "https://www.zdnet.com/"
+        },
+        {
+          "name": "PCMag",
+          "url": "https://www.pcmag.com/"
+        },
+        {
+          "name": "Gizmodo",
+          "url": "https://gizmodo.com/"
+        },
+        {
+          "name": "The Register",
+          "url": "https://www.theregister.com/"
+        },
+        {
+          "name": "Hacker News",
+          "url": "https://news.ycombinator.com/"
+        },
+        {
+          "name": "TechRadar",
+          "url": "https://www.techradar.com/"
+        },
+        {
+          "name": "Digital Trends",
+          "url": "https://www.digitaltrends.com/"
+        },
+        {
+          "name": "Android Authority",
+          "url": "https://www.androidauthority.com/"
+        },
+        {
+          "name": "MacRumors",
+          "url": "https://www.macrumors.com/"
+        },
+        {
+          "name": "The Next Web",
+          "url": "https://thenextweb.com/"
+        },
+        {
+          "name": "VentureBeat",
+          "url": "https://venturebeat.com/"
+        }
+      ]
+    },
+    {
+      "id": "business",
+      "title_fa": "اقتصاد و کسب‌وکار",
+      "title_en": "Business & Finance",
+      "sources": [
+        {
+          "name": "Bloomberg",
+          "url": "https://www.bloomberg.com/"
+        },
+        {
+          "name": "Wall Street Journal",
+          "url": "https://www.wsj.com/"
+        },
+        {
+          "name": "Financial Times",
+          "url": "https://www.ft.com/"
+        },
+        {
+          "name": "CNBC",
+          "url": "https://www.cnbc.com/"
+        },
+        {
+          "name": "Forbes",
+          "url": "https://www.forbes.com/"
+        },
+        {
+          "name": "Business Insider",
+          "url": "https://www.businessinsider.com/"
+        },
+        {
+          "name": "Reuters Business",
+          "url": "https://www.reuters.com/business/"
+        },
+        {
+          "name": "Yahoo Finance",
+          "url": "https://finance.yahoo.com/"
+        },
+        {
+          "name": "MarketWatch",
+          "url": "https://www.marketwatch.com/"
+        },
+        {
+          "name": "The Economist",
+          "url": "https://www.economist.com/"
+        },
+        {
+          "name": "Harvard Business Review",
+          "url": "https://hbr.org/"
+        },
+        {
+          "name": "Fast Company",
+          "url": "https://www.fastcompany.com/"
+        },
+        {
+          "name": "Inc.com",
+          "url": "https://www.inc.com/"
+        },
+        {
+          "name": "Fortune",
+          "url": "https://fortune.com/"
+        },
+        {
+          "name": "Barron's",
+          "url": "https://www.barrons.com/"
+        },
+        {
+          "name": "Seeking Alpha",
+          "url": "https://seekingalpha.com/"
+        },
+        {
+          "name": "The Information",
+          "url": "https://www.theinformation.com/"
+        },
+        {
+          "name": "Quartz",
+          "url": "https://qz.com/"
+        },
+        {
+          "name": "Axios Markets",
+          "url": "https://www.axios.com/"
+        },
+        {
+          "name": "Benzinga",
+          "url": "https://www.benzinga.com/"
+        }
+      ]
+    },
+    {
+      "id": "science",
+      "title_fa": "علم و سلامت",
+      "title_en": "Science & Health",
+      "sources": [
+        {
+          "name": "Nature",
+          "url": "https://www.nature.com/"
+        },
+        {
+          "name": "Science Magazine",
+          "url": "https://www.science.org/"
+        },
+        {
+          "name": "Scientific American",
+          "url": "https://www.scientificamerican.com/"
+        },
+        {
+          "name": "New Scientist",
+          "url": "https://www.newscientist.com/"
+        },
+        {
+          "name": "National Geographic",
+          "url": "https://www.nationalgeographic.com/"
+        },
+        {
+          "name": "Smithsonian Magazine",
+          "url": "https://www.smithsonianmag.com/"
+        },
+        {
+          "name": "Live Science",
+          "url": "https://www.livescience.com/"
+        },
+        {
+          "name": "Phys.org",
+          "url": "https://phys.org/"
+        },
+        {
+          "name": "ScienceDaily",
+          "url": "https://www.sciencedaily.com/"
+        },
+        {
+          "name": "WebMD",
+          "url": "https://www.webmd.com/"
+        },
+        {
+          "name": "Mayo Clinic",
+          "url": "https://www.mayoclinic.org/"
+        },
+        {
+          "name": "Healthline",
+          "url": "https://www.healthline.com/"
+        },
+        {
+          "name": "STAT News",
+          "url": "https://www.statnews.com/"
+        },
+        {
+          "name": "Medical News Today",
+          "url": "https://www.medicalnewstoday.com/"
+        },
+        {
+          "name": "The Lancet",
+          "url": "https://www.thelancet.com/"
+        },
+        {
+          "name": "NEJM",
+          "url": "https://www.nejm.org/"
+        },
+        {
+          "name": "CDC Newsroom",
+          "url": "https://www.cdc.gov/media/"
+        },
+        {
+          "name": "WHO News",
+          "url": "https://www.who.int/news"
+        },
+        {
+          "name": "Space.com",
+          "url": "https://www.space.com/"
+        },
+        {
+          "name": "Astronomy Magazine",
+          "url": "https://astronomy.com/"
+        }
+      ]
+    },
+    {
+      "id": "sports",
+      "title_fa": "ورزش",
+      "title_en": "Sports",
+      "sources": [
+        {
+          "name": "ESPN",
+          "url": "https://www.espn.com/"
+        },
+        {
+          "name": "BBC Sport",
+          "url": "https://www.bbc.com/sport"
+        },
+        {
+          "name": "Sky Sports",
+          "url": "https://www.skysports.com/"
+        },
+        {
+          "name": "The Athletic",
+          "url": "https://theathletic.com/"
+        },
+        {
+          "name": "Sports Illustrated",
+          "url": "https://www.si.com/"
+        },
+        {
+          "name": "CBS Sports",
+          "url": "https://www.cbssports.com/"
+        },
+        {
+          "name": "NBC Sports",
+          "url": "https://www.nbcsports.com/"
+        },
+        {
+          "name": "Fox Sports",
+          "url": "https://www.foxsports.com/"
+        },
+        {
+          "name": "Bleacher Report",
+          "url": "https://bleacherreport.com/"
+        },
+        {
+          "name": "Yahoo Sports",
+          "url": "https://sports.yahoo.com/"
+        },
+        {
+          "name": "Goal.com",
+          "url": "https://www.goal.com/"
+        },
+        {
+          "name": "Transfermarkt",
+          "url": "https://www.transfermarkt.com/"
+        },
+        {
+          "name": "NBA.com",
+          "url": "https://www.nba.com/"
+        },
+        {
+          "name": "NFL.com",
+          "url": "https://www.nfl.com/"
+        },
+        {
+          "name": "MLB.com",
+          "url": "https://www.mlb.com/"
+        },
+        {
+          "name": "Premier League",
+          "url": "https://www.premierleague.com/"
+        },
+        {
+          "name": "Olympics",
+          "url": "https://olympics.com/"
+        },
+        {
+          "name": "F1",
+          "url": "https://www.formula1.com/"
+        },
+        {
+          "name": "Tennis.com",
+          "url": "https://www.tennis.com/"
+        },
+        {
+          "name": "Golf Digest",
+          "url": "https://www.golfdigest.com/"
+        }
+      ]
+    },
+    {
+      "id": "entertainment",
+      "title_fa": "فرهنگ و سرگرمی",
+      "title_en": "Entertainment & Culture",
+      "sources": [
+        {
+          "name": "Variety",
+          "url": "https://variety.com/"
+        },
+        {
+          "name": "Hollywood Reporter",
+          "url": "https://www.hollywoodreporter.com/"
+        },
+        {
+          "name": "Deadline",
+          "url": "https://deadline.com/"
+        },
+        {
+          "name": "Entertainment Weekly",
+          "url": "https://ew.com/"
+        },
+        {
+          "name": "Rolling Stone",
+          "url": "https://www.rollingstone.com/"
+        },
+        {
+          "name": "Billboard",
+          "url": "https://www.billboard.com/"
+        },
+        {
+          "name": "Pitchfork",
+          "url": "https://pitchfork.com/"
+        },
+        {
+          "name": "The A.V. Club",
+          "url": "https://www.avclub.com/"
+        },
+        {
+          "name": "IndieWire",
+          "url": "https://www.indiewire.com/"
+        },
+        {
+          "name": "Vulture",
+          "url": "https://www.vulture.com/"
+        },
+        {
+          "name": "Polygon",
+          "url": "https://www.polygon.com/"
+        },
+        {
+          "name": "Kotaku",
+          "url": "https://kotaku.com/"
+        },
+        {
+          "name": "IGN",
+          "url": "https://www.ign.com/"
+        },
+        {
+          "name": "Screen Rant",
+          "url": "https://screenrant.com/"
+        },
+        {
+          "name": "Collider",
+          "url": "https://collider.com/"
+        },
+        {
+          "name": "People",
+          "url": "https://people.com/"
+        },
+        {
+          "name": "TMZ",
+          "url": "https://www.tmz.com/"
+        },
+        {
+          "name": "E! News",
+          "url": "https://www.eonline.com/"
+        },
+        {
+          "name": "The Hollywood Gossip",
+          "url": "https://www.thehollywoodgossip.com/"
+        },
+        {
+          "name": "BuzzFeed",
+          "url": "https://www.buzzfeed.com/"
+        }
+      ]
+    }
+  ]
+}

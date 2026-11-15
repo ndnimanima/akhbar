@@ -1809,3 +1809,31 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
+
+/* Creator profiles and curated source library. */
+.creator-photo { object-fit: cover; }
+.creator-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+.creator-links .chip { overflow-wrap: anywhere; max-width: 100%; }
+.creator-about { color: var(--text-dim); line-height: 1.9; margin: 0 0 16px; }
+.creator-editor, .catalog-category, .support-editor { margin-top: 12px; border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--panel-2); }
+.creator-editor summary, .catalog-category summary { cursor: pointer; font-weight: 700; padding: 4px; }
+.creator-editor[open] summary, .catalog-category[open] summary { margin-bottom: 15px; }
+.catalog-category summary span { color: var(--text-mute); font-weight: 400; margin-inline-start: 8px; }
+.catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 8px; }
+.catalog-choice { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border-radius: 9px; background: var(--panel); cursor: pointer; min-width: 0; }
+.catalog-choice input { flex: 0 0 auto; margin-top: 4px; }
+.catalog-choice span { min-width: 0; overflow-wrap: anywhere; }
+.catalog-choice small { display: block; font-size: 11px; color: var(--text-mute); margin-top: 4px; }
+.support-editor h4 { margin: 0; }
+@media (max-width: 720px) {
+  .creator { flex-direction: row; }
+  .page-head { flex-wrap: wrap; gap: 12px; }
+  .modal-back { padding: 10px; }
+  .modal { max-height: calc(100dvh - 20px); }
+}
+@media (max-width: 380px) { .creator { flex-direction: column; } }
+@media (min-width: 1800px) { .page-head h1 { font-size: 28px; } .creator .cmeta p { font-size: 14px; } }
+@media (max-width: 540px) {
+  .page-actions { max-width: 100%; min-width: 0; }
+  .page-actions .chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+}
