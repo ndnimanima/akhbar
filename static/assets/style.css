@@ -1615,6 +1615,20 @@ html[dir="rtl"] .toggle.on::after { transform: translateX(-20px); }
   margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);
 }
 .vsmart-row select { height: 30px; padding: 0 8px; font-size: 12px; min-width: 74px; }
+.vsmart-section { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
+.vsection-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.vsection-title b { font-size: 13px; }
+.vsection-title p, .vai-note { margin: 4px 0 0; color: var(--text-mute); font-size: 11.5px; line-height: 1.8; }
+.vsection-title .chip { flex: none; }
+.vai-check { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; color: var(--text-dim); margin: 2px 0 14px; }
+.vai-check input { margin-top: 5px; }
+.vai-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.vquick { display: flex; gap: 8px; }
+.vquick input { flex: 1; min-width: 0; }
+.vquick .btn { flex: none; }
+.vevidence { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; margin: 12px 0; color: var(--text-dim); background: var(--accent-soft); border-radius: 10px; font-size: 12px; }
+.vevidence svg { width: 16px; height: 16px; flex: none; margin-top: 3px; }
+@media (max-width: 540px) { .vquick { flex-direction: column; } .vsection-title { flex-wrap: wrap; } }
 
 /* progress */
 .vprogress {
@@ -1697,7 +1711,7 @@ html[dir="rtl"] .toggle.on::after { transform: translateX(-20px); }
 }
 .vblock h4 svg { width: 15px; height: 15px; color: var(--accent); flex: none; }
 .vblock h4 .tiny { margin-inline-start: auto; font-weight: 400; }
-.vsummary { margin: 0 0 10px; font-size: 13px; line-height: 2; color: var(--text); }
+.vsummary { margin: 0 0 10px; font-size: 13px; line-height: 2; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 .vcap {
   margin: 10px 0 0; padding: 11px 12px;
   border-radius: 10px; border: 1px dashed var(--border-strong);
