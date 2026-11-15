@@ -30,6 +30,8 @@
     settings: {},
     creators: [],
     creatorSupport: {},
+    feedChecks: new Set(),
+    feedBulk: null,
     creatorEditToken: "",
     archive: { status: "all", q: "" },
     draft: null,
@@ -312,9 +314,9 @@
   function applyTheme() {
     document.documentElement.setAttribute("data-theme", S.theme);
     const btn = $("#themeBtn");
-    if (btn) btn.innerHTML = S.theme === "slate" ? ico("sun") : ico("moon");
+    if (btn) btn.innerHTML = ico("sun");
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", S.theme === "slate" ? "#0a1120" : "#fdfaf3");
+    if (meta) meta.setAttribute("content", ({slate:"#0a1120", amber:"#fdfaf3", aurora:"#120e25", ocean:"#eff8fb"})[S.theme] || "#0a1120");
   }
   function applyLang() {
     document.documentElement.setAttribute("lang", S.lang);
@@ -342,6 +344,12 @@
     localStorage.setItem(LS_THEME, theme);
     applyTheme();
     api("/api/settings", { method: "PATCH", body: { theme: theme } }).catch(() => {});
+  }
+
+  function nextTheme() {
+    const themes = (S.meta && S.meta.themes || []).map((x) => x.id);
+    const choices = themes.length ? themes : ["slate", "amber", "aurora", "ocean"];
+    return choices[(choices.indexOf(S.theme) + 1) % choices.length];
   }
 
   function navConfig() {
@@ -390,6 +398,9 @@
         { icon: "users", label: "nav.sub.team", page: "creators" },
         { icon: "mail", label: "nav.sub.contact", desc: "nav.sub.contact_d", page: "creators" },
         { icon: "alert", label: "nav.sub.bug", desc: "nav.sub.bug_d", act: "creators.bug" },
+      ]},
+      { id: "logs", icon: "list", items: [
+        { icon: "activity", label: "nav.logs", desc: "nav.sub.logs_d", page: "logs" },
       ]},
     ];
   }
@@ -475,7 +486,7 @@
 
   function wireChrome() {
     $("#langBtn").addEventListener("click", () => setLang(isFa() ? "en" : "fa"));
-    $("#themeBtn").addEventListener("click", () => setTheme(S.theme === "slate" ? "amber" : "slate"));
+    $("#themeBtn").addEventListener("click", () => setTheme(nextTheme()));
     $("#logoutBtn").addEventListener("click", async () => {
       try { await api("/api/logout", { method: "POST" }); } catch (e) {}
       location.replace("/login");
@@ -513,7 +524,7 @@
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitNav).catch(() => {});
     window.addEventListener("hashchange", () => {
       const route = (location.hash || "").replace(/^#\/?/, "") || "dashboard";
-      if (route !== S.route) { S.route = route; renderNav(); render(); }
+      if (route !== S.route) { S.route = route; renderNav(); render(null, true); }
     });
   }
 
@@ -540,16 +551,20 @@
     renderNav();
     document.body.classList.remove("menu-open");
     const anchor = arguments[2];
-    await render(anchor);
+    await render(anchor, true);
     if (anchor) {
       const el = document.getElementById(anchor);
       if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }
 
-  async function render(anchor) {
+  async function render(anchor, navigating) {
     const view = $("#view");
-    const fn = PAGES[S.route] || renderDashboard;
+    const route = S.route;
+    const scrollY = window.scrollY;
+    // Keep the document height while async page loaders briefly show placeholders.
+    if (!navigating) view.style.minHeight = view.offsetHeight + "px";
+    const fn = PAGES[route] || renderDashboard;
     try {
       await fn(view);
     } catch (e) {
@@ -557,7 +572,11 @@
         '<div class="card"><div class="card-body"><div class="banner bad">' + ico("alert") +
         "<span>" + h(errMsg(e)) + "</span></div></div></div>";
     }
-    window.scrollTo({ top: 0, behavior: "auto" });
+    if (route === S.route) {
+      view.style.minHeight = "";
+      if (navigating) window.scrollTo({ top: 0, behavior: "auto" });
+      else if (window.scrollY !== scrollY) window.scrollTo({ top: scrollY, behavior: "auto" });
+    }
   }
 
   function pageHead(title, sub, actions) {
@@ -768,10 +787,12 @@
 
     view.innerHTML =
       pageHead(t("feeds.title"), t("feeds.subtitle"),
+        '<div class="feed-primary-action">' + btn(t("feeds.check_all"), "feed.checkAll", { cls: "primary", icon: "refresh", extra: S.feedBulk || S.feedChecks.size || !S.feeds.length ? " disabled" : "" }) + '</div>' +
         btn(t("feeds.catalog"), "feed.catalog", { cls: "ghost", icon: "rss" }) +
         btn(t("feeds.bulk"), "feed.bulk", { cls: "ghost", icon: "layers" }) +
         btn(t("feeds.test_url"), "feed.test", { cls: "ghost", icon: "search" }) +
         btn(t("feeds.add"), "feed.new", { cls: "primary", icon: "plus" })) +
+      '<div class="feed-progress" id="feedProgress" role="status" aria-live="polite">' + h(feedProgressText()) + '</div>' +
       '<section class="card"><div class="card-body flush"><div class="rows">' +
       (S.feeds.length
         ? '<div class="frow fhead"><div></div><div>' + h(t("common.source")) + "</div><div>" + h(t("common.status")) +
@@ -789,7 +810,7 @@
         ? '<span class="chip ok">' + h(t("feeds.healthy")) + "</span>"
         : '<span class="chip">' + h(t("feeds.not_checked")) + "</span>";
     return (
-      '<div class="frow">' +
+      '<div class="frow" data-feed-row="' + f.id + '">' +
         '<div class="favatar" style="background:' + tint(col, 0.14) + ";border-color:" + tint(col, 0.4) + ";color:" + col + '">' + h(f.icon || "📰") + "</div>" +
         '<div class="fname"><b dir="auto">' + h(f.title) + "</b>" +
           '<span class="' + (f.show_url ? "" : "hidden_url") + '" title="' + h(f.url) + '">' + h(url) + "</span></div>" +
@@ -797,11 +818,45 @@
         '<div class="c-md"><span class="mono tiny">' + num(f.last_count || 0) + "</span></div>" +
         '<div class="c-md tiny mute">' + h(f.last_checked ? relTime(f.last_checked) : t("common.never")) + "</div>" +
         '<div class="iact" style="justify-content:flex-end">' + toggleEl("feed-enabled-" + f.id, Number(f.enabled), "feed.toggle", f.id) +
-          iconBtn("refresh", "feed.check", f.id, "ghost", t("feeds.check")) +
+          (S.feedBulk || S.feedChecks.has(Number(f.id)) ? '<button class="btn xs icon ghost" disabled aria-label="' + h(t("feeds.check")) + '">' + ico("refresh") + '</button>' : iconBtn("refresh", "feed.check", f.id, "ghost", t("feeds.check"))) +
           iconBtn("edit", "feed.edit", f.id, "ghost", t("common.edit")) +
           iconBtn("trash", "feed.del", f.id, "ghost", t("common.delete")) + "</div>" +
       "</div>"
     );
+  }
+
+  function feedProgressText() {
+    const b = S.feedBulk;
+    return b ? t("feeds.check_progress", {done: num(b.done), total: num(b.total), ok: num(b.ok), failed: num(b.failed)}) : "";
+  }
+  function refreshFeedControls() {
+    if (S.route !== "feeds") return;
+    const progress = $("#feedProgress");
+    if (progress) progress.textContent = feedProgressText();
+    const all = $('[data-act="feed.checkAll"]');
+    if (all) all.disabled = !!S.feedBulk || !!S.feedChecks.size || !S.feeds.length;
+    S.feeds.forEach((feed) => {
+      const row = $('[data-feed-row="' + feed.id + '"]');
+      if (row) row.outerHTML = feedRow(feed);
+    });
+  }
+  async function checkOneFeed(id) {
+    id = Number(id);
+    S.feedChecks.add(id);
+    refreshFeedControls();
+    try {
+      const result = await api("/api/feeds/" + id + "/check", { method: "POST" });
+      const feed = S.feeds.find((f) => Number(f.id) === id);
+      if (feed) {
+        feed.last_checked = new Date().toISOString();
+        feed.last_status = result.ok ? "ok" : "error";
+        if (result.ok) feed.last_count = result.in_window;
+      }
+      return result;
+    } finally {
+      S.feedChecks.delete(id);
+      refreshFeedControls();
+    }
   }
 
   function feedModal(feed) {
@@ -1318,15 +1373,27 @@
   /* ── logs ─────────────────────────────────────────────────────────────── */
 
   async function renderLogs(view) {
-    const data = await api("/api/logs?limit=120");
+    const data = await api("/api/logs?limit=300");
     const logs = data.logs || [];
     view.innerHTML =
       pageHead(t("logs.title"), t("logs.subtitle"),
         btn(t("logs.send_to_creator"), "creators.bug", { cls: "ghost", icon: "alert" }) +
-        btn("", "reload", { cls: "ghost", icon: "refresh" })) +
-      '<section class="card"><div class="card-body flush">' +
-      (logs.length ? logs.map(logLine).join("") : emptyBox("list", t("logs.empty"), "")) +
-      "</div></section>";
+        btn(t("logs.refresh"), "reload", { cls: "ghost", icon: "refresh" })) +
+      '<section class="card"><div class="card-body"><p class="logs-note">' + h(t("logs.scope")) + '</p>' +
+      '<div class="logs-filters"><input id="logsSearch" type="search" placeholder="' + h(t("logs.search")) + '" aria-label="' + h(t("logs.search")) + '">' +
+      '<select id="logsLevel" aria-label="' + h(t("logs.level")) + '"><option value="">' + h(t("logs.all_levels")) + '</option>' +
+      [...new Set(logs.map((l) => l.level || "info"))].map((level) => '<option value="' + h(level) + '">' + h(level) + '</option>').join("") + '</select></div>' +
+      '<div id="logsList" class="logs-list"></div></div></section>';
+    const search = $("#logsSearch"), level = $("#logsLevel"), list = $("#logsList");
+    function filter() {
+      const q = search.value.trim().toLowerCase();
+      const filtered = logs.filter((l) => (!level.value || (l.level || "info") === level.value) &&
+        (!q || [l.message, l.level, l.code, l.job_id].join(" ").toLowerCase().includes(q)));
+      list.innerHTML = filtered.length ? filtered.map(logLine).join("") : emptyBox("list", t("logs.empty"), "");
+    }
+    search.addEventListener("input", filter);
+    level.addEventListener("change", filter);
+    filter();
   }
 
   /* ── settings ─────────────────────────────────────────────────────────── */
@@ -1864,7 +1931,7 @@
     },
     "nav.go": (el) => go(el.dataset.page),
     "lang.toggle": () => setLang(isFa() ? "en" : "fa"),
-    "theme.toggle": () => setTheme(S.theme === "slate" ? "amber" : "slate"),
+    "theme.toggle": () => setTheme(nextTheme()),
     "logout": async () => {
       try { await api("/api/logout", { method: "POST" }); } catch (e) {}
       location.replace("/login");
@@ -1906,13 +1973,33 @@
       if (feed) feed.enabled = el.classList.contains("on") ? 1 : 0;
     },
     "feed.check": async (el) => {
-      const id = el.dataset.id;
+      if (S.feedBulk || S.feedChecks.has(Number(el.dataset.id))) return;
       try {
-        const r = await api("/api/feeds/" + id + "/check", { method: "POST" });
+        const r = await checkOneFeed(el.dataset.id);
         if (r.ok) toast(t("feeds.test_ok", { n: num(r.total), w: num(r.in_window) }), "ok");
         else toast(r.error || t("feeds.broken"), "err");
-        await render();
       } catch (e) { toast(errMsg(e), "err"); }
+    },
+    "feed.checkAll": async () => {
+      if (S.feedBulk || S.feedChecks.size || !S.feeds.length) return;
+      // Snapshot includes disabled sources too; limit parallel network work on small servers.
+      const ids = S.feeds.map((f) => f.id);
+      const state = S.feedBulk = {total: ids.length, done: 0, ok: 0, failed: 0};
+      refreshFeedControls();
+      let next = 0;
+      async function worker() {
+        while (next < ids.length) {
+          const id = ids[next++];
+          try { const r = await checkOneFeed(id); r.ok ? state.ok++ : state.failed++; }
+          catch (e) { state.failed++; }
+          state.done++;
+          refreshFeedControls();
+        }
+      }
+      try {
+        await Promise.all(Array.from({length: Math.min(3, ids.length)}, () => worker()));
+        toast(t("feeds.check_done", {ok: num(state.ok), failed: num(state.failed)}), state.failed ? "info" : "ok");
+      } finally { S.feedBulk = null; refreshFeedControls(); }
     },
     "feed.del": (el) => {
       const feed = S.feeds.find((f) => Number(f.id) === Number(el.dataset.id));

@@ -2,16 +2,16 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Rozaneh · روزنه — one-command installer for a Linux VPS (Ubuntu/Debian).
 #
-#   curl -fsSL https://raw.githubusercontent.com/USER/Rozaneh/main/start.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/ndnimanima/akhbar/main/start.sh | bash
 #
 # Override the defaults with environment variables:
-#   ROZANEH_DIR=/opt/rozaneh ROZANEH_REPO=https://github.com/USER/Rozaneh.git
+#   ROZANEH_DIR=/opt/rozaneh ROZANEH_REPO=https://github.com/ndnimanima/akhbar.git
 #   ROZANEH_PORT=8080 ROZANEH_BRANCH=main
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 APP_DIR="${ROZANEH_DIR:-/opt/rozaneh}"
-REPO="${ROZANEH_REPO:-https://github.com/USER/Rozaneh.git}"
+REPO="${ROZANEH_REPO:-https://github.com/ndnimanima/akhbar.git}"
 BRANCH="${ROZANEH_BRANCH:-main}"
 PORT="${ROZANEH_PORT:-8080}"
 SERVICE="rozaneh"
@@ -25,17 +25,20 @@ die()  { printf "\033[31m✗ %s\033[0m\n" "$*" >&2; exit 1; }
 blue "▶ نصب پیش‌نیازها…"
 if command -v apt-get >/dev/null 2>&1; then
   apt-get update -qq
-  apt-get install -y -qq python3 python3-venv python3-pip git curl ca-certificates
+  apt-get install -y -qq python3 python3-venv python3-pip git curl ca-certificates ffmpeg
 else
   die "این اسکریپت برای Ubuntu/Debian نوشته شده است. با Docker هم می‌توانید اجرا کنید."
 fi
 
 blue "▶ دریافت کد پروژه…"
 if [ -d "$APP_DIR/.git" ]; then
-  git -C "$APP_DIR" fetch --depth 1 origin "$BRANCH"
-  git -C "$APP_DIR" reset --hard "origin/$BRANCH"
+  [ -z "$(git -C "$APP_DIR" status --porcelain --untracked-files=no)" ] || die "تغییرات محلی وجود دارد؛ ابتدا از آن‌ها پشتیبان بگیرید و وضعیت Git را بررسی کنید."
+  git -C "$APP_DIR" fetch origin "$BRANCH"
+  git -C "$APP_DIR" merge --ff-only FETCH_HEAD || die "به‌روزرسانی خودکار ممکن نیست؛ شاخه‌ها را دستی بررسی کنید."
 else
-  rm -rf "$APP_DIR"
+  if [ -d "$APP_DIR" ] && [ -n "$(ls -A "$APP_DIR")" ]; then
+    die "مسیر نصب خالی نیست و مخزن Git نیست؛ برای حفاظت از فایل‌ها ادامه نمی‌دهیم."
+  fi
   git clone --depth 1 --branch "$BRANCH" "$REPO" "$APP_DIR"
 fi
 

@@ -47,6 +47,8 @@ PORT = int(os.environ.get("PORT", "8080"))
 THEMES = [
     {"id": "slate", "name_fa": "طوسی", "name_en": "Slate", "mode": "dark"},
     {"id": "amber", "name_fa": "کهربایی و سفید", "name_en": "Amber & White", "mode": "light"},
+    {"id": "aurora", "name_fa": "شفق بنفش", "name_en": "Aurora", "mode": "dark"},
+    {"id": "ocean", "name_fa": "اقیانوس", "name_en": "Ocean", "mode": "light"},
 ]
 
 LANGUAGES = [
