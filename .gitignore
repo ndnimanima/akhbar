@@ -1,0 +1,28 @@
+# ── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.Python
+
+# ── Runtime state (never commit the database) ────────────────────────────
+data/*
+!data/.gitkeep
+.ci-data/
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# ── Secrets ──────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Editors / OS ─────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
