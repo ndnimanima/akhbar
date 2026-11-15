@@ -1,0 +1,19 @@
+# Keep local state, credentials, and development artifacts out of the build context.
+.git
+.github
+.venv
+venv
+env
+__pycache__
+**/__pycache__
+*.py[cod]
+.env
+.env.*
+!.env.example
+data
+.ci-data
+*.db
+*.db-wal
+*.db-shm
+*.log
+node_modules

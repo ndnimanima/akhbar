@@ -71,3 +71,24 @@ jobs:
           assert scheduler.next_run(job) is not None
           print("smoke test ok")
           PY
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the production image
+        run: docker build -t rozaneh:ci .
+      - name: Check non-root startup, custom port and health endpoint
+        run: |
+          set -eu
+          docker run -d --name rozaneh-ci -e PORT=9090 -e SCHEDULER_ENABLED=0 -p 127.0.0.1:9090:9090 rozaneh:ci
+          trap 'docker logs rozaneh-ci; docker rm -f rozaneh-ci' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:9090/healthz; then
+              docker exec rozaneh-ci sh -c 'test "$(id -u)" = 10001 && command -v ffmpeg && command -v ffprobe'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'Application did not become healthy' >&2
+          exit 1
