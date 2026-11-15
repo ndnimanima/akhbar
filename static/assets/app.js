@@ -29,6 +29,8 @@
     jobs: [],
     settings: {},
     creators: [],
+    creatorSupport: {},
+    creatorEditToken: "",
     archive: { status: "all", q: "" },
     draft: null,
     video: { settings: null, status: null, jobs: [], polling: null, activeJob: null },
@@ -766,6 +768,7 @@
 
     view.innerHTML =
       pageHead(t("feeds.title"), t("feeds.subtitle"),
+        btn(t("feeds.catalog"), "feed.catalog", { cls: "ghost", icon: "rss" }) +
         btn(t("feeds.bulk"), "feed.bulk", { cls: "ghost", icon: "layers" }) +
         btn(t("feeds.test_url"), "feed.test", { cls: "ghost", icon: "search" }) +
         btn(t("feeds.add"), "feed.new", { cls: "primary", icon: "plus" })) +
@@ -1556,86 +1559,87 @@
 
   /* ── creators ─────────────────────────────────────────────────────────── */
 
+  function safeLink(value, prefix) {
+    const v = (value || "").trim();
+    if (!v) return "";
+    const url = prefix && !/^https?:\/\//i.test(v) ? prefix + v.replace(/^@/, "") : v;
+    return /^https?:\/\//i.test(url) ? url : "";
+  }
+
   async function renderCreators(view) {
     const data = await api("/api/creators");
     S.creators = data.creators || [];
+    S.creatorSupport = data;
     const cards = S.creators.map((c) => {
-      const name = c.name || t("creators.slot" + c.slot);
-      const role = isFa() ? (c.role_fa || "") : (c.role_en || "");
-      const bio = isFa() ? (c.bio_fa || "") : (c.bio_en || "");
-      const links = [
-        c.telegram ? '<a class="chip" href="' + h(c.telegram.startsWith("http") ? c.telegram : "https://t.me/" + c.telegram.replace(/^@/, "")) + '" target="_blank" rel="noopener">' + ico("telegram") + "Telegram</a>" : "",
-        c.github ? '<a class="chip" href="' + h(c.github.startsWith("http") ? c.github : "https://github.com/" + c.github.replace(/^@/, "")) + '" target="_blank" rel="noopener">' + ico("code") + "GitHub</a>" : "",
-        c.email ? '<a class="chip" href="mailto:' + h(c.email) + '">' + ico("mail") + h(c.email) + "</a>" : "",
-        c.website ? '<a class="chip" href="' + h(c.website) + '" target="_blank" rel="noopener">' + ico("globe") + "Web</a>" : "",
-      ].join("");
-      return (
-        '<div class="creator"><span class="avatar-lg">' + h(c.name ? c.name.trim().charAt(0) : (isFa() ? ["۱", "۲"][c.slot - 1] : String(c.slot))) + "</span>" +
-          '<div class="cmeta" style="flex:1"><b dir="auto">' + h(name) + "</b>" +
-          '<span class="crole">' + h(role || t("creators.slot" + c.slot)) + "</span>" +
-          (bio ? '<p dir="auto">' + h(bio) + "</p>" : (!c.name ? '<p class="tiny mute">' + h(t("creators.fill_hint")) + "</p>" : "")) +
-          '<div class="inline" style="margin-top:4px">' + links + "</div></div>" +
-          '<div class="btns" style="align-self:flex-start">' + iconBtn("edit", "creator.edit", c.slot, "ghost", t("common.edit")) + "</div>" +
-        "</div>"
-      );
+      const name = (isFa() ? c.name : (c.name_en || c.name)) || t("creators.slot" + c.slot);
+      const role = isFa() ? c.role_fa : c.role_en;
+      const bio = isFa() ? c.bio_fa : c.bio_en;
+      const link = (value, label, prefix) => {
+        const url = safeLink(value, prefix);
+        return url ? '<a class="chip" href="' + h(url) + '" target="_blank" rel="noopener noreferrer">' + h(label) + '</a>' : '';
+      };
+      const links = link(c.github, "GitHub", "https://github.com/") + link(c.telegram, "Telegram", "https://t.me/") +
+        (c.email && /^[^@\s]+@[^@\s]+$/.test(c.email) ? '<a class="chip" href="mailto:' + h(c.email) + '">' + h(c.email) + '</a>' : '') +
+        link(c.website, t("creators.website")) + link(c.youtube, "YouTube") + link(c.channel, t("creators.channel"));
+      const photo = safeLink(c.photo);
+      return '<div class="creator">' + (photo ? '<img class="avatar-lg creator-photo" src="' + h(photo) + '" alt="' + h(name) + '" loading="lazy" referrerpolicy="no-referrer">' : '<span class="avatar-lg">' + h(name.charAt(0)) + '</span>') +
+        '<div class="cmeta"><b dir="auto">' + h(name) + '</b><span class="crole">' + h(role || '') + '</span><p dir="auto">' + h(bio || '') + '</p><div class="creator-links">' + links + '</div></div></div>';
     }).join("");
-
-    const ver = (S.meta && S.meta.version) || "1.01";
-    view.innerHTML =
-      pageHead(t("creators.title"), t("creators.subtitle"), btn(t("creators.bug_report"), "creators.bug", { cls: "ghost", icon: "alert" })) +
-      '<div class="grid side even"><div class="stack">' +
-        card(t("creators.team"), "users", '<div class="stack">' + (cards || emptyBox("users", t("common.empty"), "")) + "</div>") +
-      "</div><div class=\"stack\">" +
-        card(t("creators.contact"), "mail",
-          '<form data-form="feedback" id="contactForm">' +
-          '<div class="form-grid">' +
-          field(t("creators.your_name"), '<input type="text" name="name" dir="auto">') +
-          field(t("creators.your_contact"), '<input type="text" name="contact" dir="auto" placeholder="@username">') +
-          '<div class="span2">' + field(t("creators.message"), '<textarea name="message" rows="4" dir="auto" placeholder="' + h(t("creators.message_ph")) + '" required minlength="3"></textarea>') + "</div>" +
-          "</div>" +
-          '<button class="btn primary" data-act="submit" data-form-id="contactForm">' + ico("send") + "<span>" + h(t("creators.send")) + "</span></button></form>") +
-        card(t("creators.about"), "sparkles",
-          '<p style="margin:0 0 10px;font-size:12.5px;line-height:1.9;color:var(--text-dim)" dir="auto">' +
-          h(isFa()
-            ? "روزنه خبرهای منابع خبری را در بازه‌های زمانی مشخص می‌خواند، بر اساس موضوع دسته‌بندی می‌کند، به فارسی روان ترجمه می‌کند و هر خبر را با عکس خودش به‌صورت یک پیام مستقل در کانال‌های شما منتشر می‌کند."
-            : "Rozaneh reads your sources on schedule, classifies each item by topic, translates it into fluent Persian and publishes every item as its own message, together with its image.") +
-          "</p>" +
-          '<div class="kv"><span>' + h(t("common.version")) + '</span><b>v' + h(ver) + "</b></div>" +
-          '<div class="kv"><span>' + h(t("creators.built_with")) + '</span><b class="txt">FastAPI · SQLite · Vanilla JS</b></div>' +
-          '<div class="kv"><span>' + h(t("creators.license")) + '</span><b class="txt">MIT</b></div>' +
-          '<div class="kv"><span>' + h(t("creators.deploy")) + '</span><b class="txt">Railway · Docker</b></div>') +
-      "</div></div>";
+    const ver = (S.meta && S.meta.version) || "1.04";
+    view.innerHTML = pageHead(t("creators.title"), t("creators.subtitle"),
+      btn(t("creators.login"), "creator.edit", { cls: "ghost", icon: "edit" }) + btn(t("creators.bug_report"), "creators.bug", { cls: "ghost", icon: "alert" })) +
+      '<div class="grid side even"><div class="stack">' + card(t("creators.team"), "users", '<div class="stack">' + cards + '</div>') +
+      '</div><div class="stack">' + card(t("creators.contact"), "mail",
+        '<form data-form="feedback" id="contactForm"><div class="form-grid">' +
+        field(t("creators.your_name"), '<input type="text" name="name" dir="auto" maxlength="60">') +
+        field(t("creators.your_contact"), '<input type="text" name="contact" dir="auto" maxlength="80" placeholder="@username">') +
+        '<div class="span2">' + field(t("creators.message"), '<textarea name="message" rows="4" dir="auto" maxlength="3000" placeholder="' + h(t("creators.message_ph")) + '" required minlength="3"></textarea>') + '</div></div>' +
+        '<button class="btn primary" data-act="submit" data-form-id="contactForm">' + ico("send") + '<span>' + h(t("creators.send")) + '</span></button></form>') +
+      card(t("creators.about"), "sparkles", '<p class="creator-about">' + h(t("creators.about_text")) + '</p>' +
+        '<div class="kv"><span>' + h(t("common.version")) + '</span><b>v' + h(ver) + '</b></div>' +
+        '<div class="kv"><span>' + h(t("creators.built_with")) + '</span><b>FastAPI · SQLite · Vanilla JS</b></div>') + '</div></div>';
   }
 
-  function creatorModal(slot) {
-    const c = (S.creators || []).find((x) => Number(x.slot) === Number(slot)) || { slot: slot };
-    openModal({
-      title: t("creators.slot" + slot),
-      wide: true,
-      body:
-        '<form data-form="creator" id="creatorForm" data-slot="' + slot + '">' +
-        '<div class="form-grid">' +
-        field(t("common.name"), '<input type="text" name="creator' + slot + '_name" value="' + h(c.name) + '" dir="auto">') +
-        field(t("creators.role") + " (FA)", '<input type="text" name="creator' + slot + '_role_fa" value="' + h(c.role_fa) + '" dir="auto">') +
-        field(t("creators.role") + " (EN)", '<input class="ltr" type="text" name="creator' + slot + '_role_en" value="' + h(c.role_en) + '">') +
-        field("Telegram", '<input class="ltr" type="text" name="creator' + slot + '_telegram" value="' + h(c.telegram) + '" placeholder="@username">') +
-        field("GitHub", '<input class="ltr" type="text" name="creator' + slot + '_github" value="' + h(c.github) + '" placeholder="username">') +
-        field("Email", '<input class="ltr" type="email" name="creator' + slot + '_email" value="' + h(c.email) + '">') +
-        '<div class="span2">' + field("Bio (FA)", '<textarea name="creator' + slot + '_bio_fa" rows="2" dir="auto">' + h(c.bio_fa) + "</textarea>") + "</div>" +
-        '<div class="span2">' + field("Bio (EN)", '<textarea name="creator' + slot + '_bio_en" rows="2" dir="ltr">' + h(c.bio_en) + "</textarea>") + "</div>" +
-        "</div></form>",
-      footer:
-        '<button class="btn ghost" data-act="modal.close">' + t("common.cancel") + "</button>" +
-        '<button class="btn primary" data-act="submit" data-form-id="creatorForm">' + t("common.save") + "</button>",
-    });
+  function creatorLoginModal() {
+    S.creatorEditToken = "";
+    openModal({ title: t("creators.login"),
+      body: '<form data-form="creator-login" id="creatorLoginForm"><p class="tiny mute">' + h(t("creators.password_hint")) + '</p>' +
+        field(t("creators.password"), '<input type="password" name="password" required autocomplete="current-password">') + '</form>',
+      footer: '<button class="btn ghost" data-act="modal.close">' + h(t("common.cancel")) + '</button><button class="btn primary" data-act="submit" data-form-id="creatorLoginForm">' + h(t("creators.login")) + '</button>' });
+  }
+
+  function creatorModal() {
+    const fields = [["name", "common.name"], ["name_en", "creators.name_en"], ["role_fa", "creators.role_fa"], ["role_en", "creators.role_en"], ["bio_fa", "creators.bio_fa"], ["bio_en", "creators.bio_en"], ["github", "creators.github"], ["telegram", "creators.telegram"], ["email", "creators.email"], ["website", "creators.website"], ["photo", "creators.photo"], ["youtube", "creators.youtube"], ["channel", "creators.channel"]];
+    const editors = S.creators.map((c) => '<details class="creator-editor"><summary>' + h(c.name || t("creators.slot" + c.slot)) + '</summary><div class="form-grid">' + fields.map(([key, label]) =>
+      field(t(label), '<input type="text" dir="auto" name="creator' + c.slot + '_' + key + '" value="' + h(c[key] || '') + '">')).join('') + '</div></details>').join('');
+    openModal({ title: t("creators.edit_all"), wide: true,
+      body: '<form data-form="creator" id="creatorForm">' +
+        editors +
+        '<div class="support-editor"><h4>' + h(t("creators.support")) + '</h4><p class="tiny mute">' + h(t("creators.support_hint")) + '</p><div class="form-grid">' +
+        field(t("creators.bot_token"), '<input type="password" name="feedback_bot_token" autocomplete="new-password" placeholder="' + h(S.creatorSupport.feedback_bot_set ? t("creators.token_keep") : '') + '">') +
+        field(t("creators.chat_id"), '<input type="text" name="feedback_chat_id" dir="ltr" value="' + h(S.creatorSupport.feedback_chat_id || '') + '">') + '</div>' +
+        '<label class="catalog-choice"><input type="checkbox" name="clear_feedback_bot_token" value="1"> ' + h(t("creators.token_clear")) + '</label></div></form>',
+      footer: '<button class="btn ghost" data-act="modal.close">' + h(t("common.cancel")) + '</button><button class="btn primary" data-act="submit" data-form-id="creatorForm">' + h(t("common.save")) + '</button>' });
+  }
+
+  async function catalogModal() {
+    const response = await fetch('/assets/source-catalog.json');
+    if (!response.ok) throw new Error('network_error');
+    const data = await response.json();
+    const existing = new Set(S.feeds.map((f) => f.url));
+    const categories = data.categories.map((category) => '<details class="catalog-category"><summary>' + h(isFa() ? category.title_fa : category.title_en) + ' <span>' + num(category.sources.length) + '</span></summary><div class="catalog-grid">' +
+      category.sources.map((source) => '<label class="catalog-choice"><input type="checkbox" name="source" value="' + h(source.url) + '"' + (existing.has(source.url) ? ' disabled' : '') + '><span><b>' + h(source.name) + '</b><small dir="ltr">' + h(source.url) + '</small></span></label>').join('') + '</div></details>').join('');
+    openModal({ title: t("feeds.catalog"), wide: true,
+      body: '<form data-form="catalog" id="catalogForm"><p class="tiny mute">' + h(t("feeds.catalog_hint")) + '</p>' + categories + '</form>',
+      footer: '<button class="btn ghost" data-act="modal.close">' + h(t("common.cancel")) + '</button><button class="btn primary" data-act="submit" data-form-id="catalogForm">' + h(t("feeds.catalog_add")) + '</button>' });
   }
 
   function feedbackModal(prefill) {
     openModal({
       title: t("creators.bug_report"),
       body:
-        '<form data-form="feedback" id="bugForm">' +
-        field(t("creators.message"), '<textarea name="message" rows="7" dir="auto" required minlength="3">' + h(prefill || "") + "</textarea>") +
+        '<form data-form="feedback" data-kind="bug" id="bugForm">' +
+        field(t("creators.message"), '<textarea name="message" rows="7" dir="auto" maxlength="3000" required minlength="3">' + h(prefill || "") + "</textarea>") +
         '<div class="form-grid">' +
         field(t("creators.your_name"), '<input type="text" name="name" dir="auto">') +
         field(t("creators.your_contact"), '<input type="text" name="contact" dir="auto" placeholder="@username">') +
@@ -1809,18 +1813,31 @@
       return;
     }
     if (kind === "feedback") {
-      await api("/api/feedback", { method: "POST", body: { kind: "message", name: v.name || "", contact: v.contact || "", message: v.message || "" } });
-      form.reset();
-      toast(t("creators.sent"), "ok");
+      const result = await api("/api/feedback", { method: "POST", body: { kind: form.dataset.kind || "message", name: v.name || "", contact: v.contact || "", message: v.message || "" } });
+      if (result.forwarded) { form.reset(); toast(t("creators.sent"), "ok"); }
+      else toast(t("creators.not_forwarded"), "err");
+      return;
+    }
+    if (kind === "creator-login") {
+      const result = await api("/api/creators/unlock", { method: "POST", body: { password: v.password } });
+      S.creatorEditToken = result.edit_token;
+      creatorModal();
       return;
     }
     if (kind === "creator") {
-      const slot = form.dataset.slot;
-      const body = {};
-      Object.keys(v).forEach((k) => { if (k.indexOf("creator" + slot + "_") === 0) body[k] = v[k]; });
-      const r = await api("/api/creators", { method: "PATCH", body: body });
+      v.edit_token = S.creatorEditToken;
+      v.clear_feedback_bot_token = !!form.querySelector('[name="clear_feedback_bot_token"]:checked');
+      const r = await api("/api/creators", { method: "PATCH", body: v });
       S.creators = r.creators || S.creators;
+      S.creatorEditToken = "";
       closeModal(); toast(t("common.ok"), "ok"); await render();
+      return;
+    }
+    if (kind === "catalog") {
+      const urls = Array.from(form.querySelectorAll('input[name="source"]:checked')).map((el) => el.value);
+      if (!urls.length) { toast(t("feeds.catalog_select"), "err"); return; }
+      const r = await api("/api/feeds/bulk", { method: "POST", body: { text: urls.join("\n") } });
+      closeModal(); toast(t("feeds.catalog_added", { n: num(r.created) }), "ok"); await render();
       return;
     }
   }
@@ -1870,6 +1887,7 @@
     "feed.new": () => feedModal(null),
     "feed.edit": (el) => feedModal(S.feeds.find((f) => Number(f.id) === Number(el.dataset.id))),
     "feed.bulk": () => bulkModal(),
+    "feed.catalog": () => catalogModal(),
     "feed.test": () => feedTestModal(),
     "feed.emoji": (el) => {
       const input = $("#feedIcon");
@@ -2142,7 +2160,7 @@
     },
 
     /* creators / feedback */
-    "creator.edit": (el) => creatorModal(el.dataset.id),
+    "creator.edit": () => creatorLoginModal(),
     "creators.bug": () => {
       const logs = $$(".logline .lm").slice(0, 6).map((el) => "· " + el.textContent).join("\n");
       feedbackModal(logs ? t("logs.title") + ":\n" + logs + "\n\n" : "");

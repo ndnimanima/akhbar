@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import shutil
 import tempfile
 import time
@@ -20,6 +21,18 @@ from . import config, db, feeds, pipeline, publish, scheduler, security, topics 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("rozaneh")
+
+
+class _HttpxSecretFilter(logging.Filter):
+    """httpx INFO request logs contain full URLs, including Telegram bot tokens."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.getMessage().startswith("HTTP Request:"):
+            record.msg = "HTTP request completed (URL suppressed)"
+            record.args = ()
+        return True
+
+
+logging.getLogger("httpx").addFilter(_HttpxSecretFilter())
 
 STARTED_AT = time.time()
 
@@ -151,7 +164,12 @@ class SettingsPayload(BaseModel):
 
 class CreatorsPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
+    edit_token: str
+    feedback_bot_token: str | None = None
+    feedback_chat_id: str | None = None
+    clear_feedback_bot_token: bool = False
     creator1_name: str | None = None
+    creator1_name_en: str | None = None
     creator1_role_fa: str | None = None
     creator1_role_en: str | None = None
     creator1_bio_fa: str | None = None
@@ -160,7 +178,11 @@ class CreatorsPayload(BaseModel):
     creator1_github: str | None = None
     creator1_email: str | None = None
     creator1_website: str | None = None
+    creator1_photo: str | None = None
+    creator1_youtube: str | None = None
+    creator1_channel: str | None = None
     creator2_name: str | None = None
+    creator2_name_en: str | None = None
     creator2_role_fa: str | None = None
     creator2_role_en: str | None = None
     creator2_bio_fa: str | None = None
@@ -169,6 +191,22 @@ class CreatorsPayload(BaseModel):
     creator2_github: str | None = None
     creator2_email: str | None = None
     creator2_website: str | None = None
+    creator2_photo: str | None = None
+    creator2_youtube: str | None = None
+    creator2_channel: str | None = None
+    creator3_name: str | None = None
+    creator3_name_en: str | None = None
+    creator3_role_fa: str | None = None
+    creator3_role_en: str | None = None
+    creator3_bio_fa: str | None = None
+    creator3_bio_en: str | None = None
+    creator3_telegram: str | None = None
+    creator3_github: str | None = None
+    creator3_email: str | None = None
+    creator3_website: str | None = None
+    creator3_photo: str | None = None
+    creator3_youtube: str | None = None
+    creator3_channel: str | None = None
 
 
 class PasswordPayload(BaseModel):
@@ -311,7 +349,7 @@ def clean_schedule(value: str | list[str] | None) -> str:
     return db.dump(sorted(cleaned))
 
 
-SECRET_SETTINGS = {"password_hash", "password_salt", "deepseek_api_key", "openai_api_key", "video_ai_api_key"}
+SECRET_SETTINGS = {"password_hash", "password_salt", "deepseek_api_key", "openai_api_key", "video_ai_api_key", "feedback_bot_token"}
 
 
 def settings_public() -> dict:
@@ -328,11 +366,12 @@ def settings_public() -> dict:
 
 def creators_public() -> list[dict]:
     out = []
-    for idx in (1, 2):
+    for idx in (1, 2, 3):
         out.append(
             {
                 "slot": idx,
                 "name": db.get_setting(f"creator{idx}_name"),
+                "name_en": db.get_setting(f"creator{idx}_name_en"),
                 "role_fa": db.get_setting(f"creator{idx}_role_fa"),
                 "role_en": db.get_setting(f"creator{idx}_role_en"),
                 "bio_fa": db.get_setting(f"creator{idx}_bio_fa"),
@@ -341,6 +380,9 @@ def creators_public() -> list[dict]:
                 "github": db.get_setting(f"creator{idx}_github"),
                 "email": db.get_setting(f"creator{idx}_email"),
                 "website": db.get_setting(f"creator{idx}_website"),
+                "photo": db.get_setting(f"creator{idx}_photo"),
+                "youtube": db.get_setting(f"creator{idx}_youtube"),
+                "channel": db.get_setting(f"creator{idx}_channel"),
             }
         )
     return out
@@ -469,14 +511,58 @@ async def patch_settings(payload: SettingsPayload, _: None = auth) -> dict:
 
 @app.get("/api/creators")
 async def get_creators(_: None = auth) -> dict:
-    return {"creators": creators_public()}
+    return {"creators": creators_public(), "feedback_chat_id": db.get_setting("feedback_chat_id"), "feedback_bot_set": bool(db.get_setting("feedback_bot_token"))}
+
+
+# Short-lived, one-use edit grants are bound to the authenticated panel session.
+_creator_attempts: dict[str, list[float]] = {}
+_creator_unlocks: dict[str, tuple[str, float]] = {}
+
+
+@app.post("/api/creators/unlock")
+async def unlock_creators(payload: LoginPayload, request: Request, _: None = auth) -> dict:
+    session = security.current_token(request) or ""
+    now = time.monotonic()
+    # Keep these in-memory maps bounded by removing old entries on use.
+    for key, (_, expiry) in list(_creator_unlocks.items()):
+        if expiry <= now:
+            _creator_unlocks.pop(key, None)
+    for key, timestamps in list(_creator_attempts.items()):
+        if not timestamps or now - timestamps[-1] >= 300:
+            _creator_attempts.pop(key, None)
+    attempts = [t for t in _creator_attempts.get(session, []) if now - t < 300]
+    if len(attempts) >= 5:
+        fail("too_many_attempts", 429)
+    if not security.verify_password(payload.password):
+        attempts.append(now)
+        _creator_attempts[session] = attempts
+        fail("password_current_wrong")
+    _creator_attempts.pop(session, None)
+    token = secrets.token_urlsafe(32)
+    _creator_unlocks[session] = (token, now + 1800)
+    return {"ok": True, "edit_token": token}
 
 
 @app.patch("/api/creators")
-async def patch_creators(payload: CreatorsPayload, _: None = auth) -> dict:
-    for key, value in payload.model_dump(exclude_unset=True).items():
+async def patch_creators(payload: CreatorsPayload, request: Request, _: None = auth) -> dict:
+    session = security.current_token(request) or ""
+    grant = _creator_unlocks.get(session)
+    if not grant or grant[1] <= time.monotonic() or not secrets.compare_digest(grant[0], payload.edit_token):
+        fail("creator_unlock_required", 403)
+    data = payload.model_dump(exclude_unset=True)
+    data.pop("edit_token", None)
+    clear = data.pop("clear_feedback_bot_token", False)
+    token = (data.pop("feedback_bot_token", None) or "").strip()
+    if clear:
+        db.set_setting("feedback_bot_token", "")
+    elif token:
+        if not __import__("re").fullmatch(r"[0-9]{5,20}:[A-Za-z0-9_-]{20,100}", token):
+            fail("feedback_token_invalid")
+        db.set_setting("feedback_bot_token", token)
+    for key, value in data.items():
         if value is not None:
-            db.set_setting(key, str(value).strip())
+            db.set_setting(key, str(value).strip()[:2000])
+    _creator_unlocks.pop(session, None)
     return {"ok": True, "creators": creators_public()}
 
 
@@ -1134,8 +1220,8 @@ async def admin_import(payload: ImportPayload, _: None = auth) -> dict:
             imported["jobs"] += 1
     if isinstance(data.get("settings"), dict):
         for key, value in data["settings"].items():
-            if key in SECRET_SETTINGS:
-                continue
+            if key in SECRET_SETTINGS or key.startswith(("creator1_", "creator2_", "creator3_")) or key == "feedback_chat_id":
+                continue  # Creator/support edits require explicit reauthentication.
             # Backups omit secrets. Do not redirect an existing video API key
             # to a different endpoint or protocol when restoring a backup.
             if key in {"video_ai_provider", "video_ai_base_url"} and db.get_setting("video_ai_api_key"):
@@ -1161,35 +1247,34 @@ async def admin_clear_archive(_: None = auth) -> dict:
 
 
 @app.post("/api/feedback")
-async def feedback(payload: FeedbackPayload) -> dict:
-    """Messages and bug reports from the contact/creators section."""
+async def feedback(payload: FeedbackPayload, _: None = auth) -> dict:
+    """Record locally and forward to configured support channels."""
+    import httpx
+
     message = (payload.message or "").strip()
-    if len(message) < 3:
+    if len(message) < 3 or len(message) > 3000:
         fail("message_required")
-    kind = (payload.kind or "message").strip()[:20] or "message"
-    line = f"[{kind}] {payload.name.strip()[:60]} | {payload.contact.strip()[:80]} | {message}"
+    kind = "bug" if payload.kind == "bug" else "message"
+    name, contact = payload.name.strip()[:60], payload.contact.strip()[:80]
+    line = f"[{kind}] {name} | {contact} | {message}"
     db.log(None, line[:2000], level="feedback", code="feedback")
     forwarded = False
-    hook = (db.get_setting("feedback_webhook") or "").strip()
-    if hook.startswith(("http://", "https://")):
-        try:
-            import httpx
-
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(
-                    hook,
-                    json={
-                        "app": "Rozaneh",
-                        "version": config.VERSION,
-                        "kind": kind,
-                        "name": payload.name.strip(),
-                        "contact": payload.contact.strip(),
-                        "message": message,
-                    },
-                )
-                forwarded = resp.status_code < 400
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("feedback webhook failed: %s", exc)
+    token = db.get_setting("feedback_bot_token").strip()
+    chat_id = db.get_setting("feedback_chat_id").strip()
+    hook = db.get_setting("feedback_webhook").strip()
+    async with httpx.AsyncClient(timeout=10) as client:
+        if token and chat_id:
+            try:
+                resp = await client.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": line})
+                forwarded = resp.is_success and bool(resp.json().get("ok"))
+            except (httpx.HTTPError, ValueError):
+                pass  # Never log the token-bearing URL.
+        if hook.startswith(("http://", "https://")):
+            try:
+                resp = await client.post(hook, json={"app": "Rozaneh", "version": config.VERSION, "kind": kind, "name": name, "contact": contact, "message": message})
+                forwarded = resp.is_success or forwarded
+            except httpx.HTTPError:
+                pass
     return {"ok": True, "forwarded": forwarded}
 
 

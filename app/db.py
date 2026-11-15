@@ -230,6 +230,20 @@ DEFAULT_SETTINGS = {
 }
 
 
+# Profile information comes from the authors' public GitHub READMEs.
+CREATOR_DEFAULTS = {
+    1: dict(name="نیما دلیر", name_en="Nima Dalir", role_fa="توسعه‌دهنده و تولیدکننده محتوای فناوری", role_en="Developer & technology educator", bio_fa="دانشجوی مهندسی کامپیوتر، علاقه‌مند به هوش مصنوعی آفلاین، پایتون و آموزش فناوری.", bio_en="Computer engineering student interested in offline AI, Python and technology education.", github="ndnima", telegram="https://t.me/ndnima", email="dalirnima137@gmail.com", website="https://ndnima.github.io/", photo="https://avatars.githubusercontent.com/u/342028048?v=4"),
+    2: dict(name="علیرضا بخارائی", name_en="Alireza Bokharaei", role_fa="توسعه‌دهنده نرم‌افزار و زیرساخت", role_en="Software & infrastructure developer", bio_fa="دانشجوی علوم کامپیوتر با تمرکز بر توسعه نرم‌افزار، لینوکس و امنیت سایبری.", bio_en="Computer science student focused on software development, Linux infrastructure and cybersecurity.", github="alireza-bokharaei", telegram="https://t.me/alireza_bokharaei_051", email="alireza.bokharaei.051@gmail.com", website="https://alireza-bokharaei.github.io/", photo="https://avatars.githubusercontent.com/u/347124742?v=4"),
+    3: dict(name="متین", name_en="Matin", role_fa="توسعه‌دهنده پایتون و وب", role_en="Python & web developer", bio_fa="توسعه‌دهنده پایتون و جنگو و سازنده پروژه مزه.", bio_en="Python and Django developer and creator of the Mazetoori project.", github="ostovar04", telegram="https://t.me/Beagk", email="benjaminbigbang24@gmail.com", website="https://ostovar04.github.io/Mazetoori/", photo="https://avatars.githubusercontent.com/u/28998015?v=4"),
+}
+for _slot, _profile in CREATOR_DEFAULTS.items():
+    for _key, _value in _profile.items():
+        DEFAULT_SETTINGS[f"creator{_slot}_{_key}"] = _value
+    DEFAULT_SETTINGS[f"creator{_slot}_youtube"] = "https://www.youtube.com/@nextgen-ain8n"
+    DEFAULT_SETTINGS[f"creator{_slot}_channel"] = "https://t.me/nextgen_ain8n"
+DEFAULT_SETTINGS.update(feedback_bot_token="", feedback_chat_id="")
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -271,6 +285,15 @@ def _seed() -> None:
     assert _CONN is not None
     for key, value in DEFAULT_SETTINGS.items():
         _CONN.execute("INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (key, value))
+    # Populate old, untouched placeholder slots without overwriting user profiles.
+    if not _CONN.execute("SELECT 1 FROM settings WHERE key='creator_profiles_seeded_v1'").fetchone():
+        for slot, profile in CREATOR_DEFAULTS.items():
+            if slot in (1, 2):
+                fields = ("name", "bio_fa", "bio_en", "telegram", "github", "email", "website")
+                if not any((_CONN.execute("SELECT value FROM settings WHERE key=?", (f"creator{slot}_{field}",)).fetchone() or [""])[0] for field in fields):
+                    for field, value in profile.items():
+                        _CONN.execute("UPDATE settings SET value=? WHERE key=?", (value, f"creator{slot}_{field}"))
+        _CONN.execute("INSERT INTO settings(key,value) VALUES('creator_profiles_seeded_v1','1')")
     count = _CONN.execute("SELECT COUNT(*) AS c FROM topics").fetchone()["c"]
     if not count:
         stamp = now_iso()
