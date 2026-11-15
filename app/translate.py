@@ -286,6 +286,87 @@ async def translate_with_report(text: str, target: str | None = None) -> dict:
     }
 
 
+async def _llm_no_timeout(
+    text: str,
+    target: str,
+    base_url: str,
+    model: str,
+    api_key: str,
+    system: str,
+) -> str:
+    """LLM call with **no timeout** — used by the video analyzer's summary.
+
+    The video summary must run «هرچقدر طول کشید» (however long it takes), so
+    this client is created with ``httpx.Timeout(None)`` instead of the
+    panel-wide ``HTTP_TIMEOUT`` used by news translation.
+    """
+    if not api_key:
+        raise TranslationError("no_key")
+    body = {
+        "model": model,
+        "temperature": 0.2,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": text[:12000]},
+        ],
+    }
+    async with httpx.AsyncClient(timeout=httpx.Timeout(None)) as client:
+        response = await client.post(
+            f"{base_url.rstrip('/')}/chat/completions",
+            json=body,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        )
+    if response.status_code >= 400:
+        raise TranslationError(f"llm_status_{response.status_code}")
+    try:
+        data = response.json()
+        return (data["choices"][0]["message"]["content"] or "").strip()
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise TranslationError("llm_bad_response") from exc
+
+
+async def summarize_no_timeout(text: str, title: str = "", target: str = "fa") -> str:
+    """Summarise a video transcript/description into Persian — no timeout.
+
+    Tries the panel's LLM (DeepSeek, then the OpenAI-compatible fallback)
+    with an infinite timeout. Returns ``""`` when no key is configured so the
+    caller can use its extractive fallback — the analysis never fails here.
+    """
+    text = (text or "").strip()
+    if not text:
+        return ""
+    language = "Persian (Farsi)" if target == "fa" else target
+    system = (
+        f"You are a senior news editor summarising a video into {language}. "
+        "Write a fluent, faithful summary of 4-7 sentences: what the video is about, "
+        "its main points and why it matters. Keep names, numbers and dates exactly. "
+        "Output only the summary — no headings, no bullet lists, no notes."
+        + (f" Video title: {title}." if title else "")
+    )
+    attempts = [
+        (
+            db.get_setting("deepseek_base_url") or "https://api.deepseek.com/v1",
+            db.get_setting("deepseek_model") or "deepseek-chat",
+            db.get_setting("deepseek_api_key"),
+        ),
+        (
+            db.get_setting("openai_base_url") or "https://api.openai.com/v1",
+            db.get_setting("openai_model") or "gpt-4o-mini",
+            db.get_setting("openai_api_key"),
+        ),
+    ]
+    for base_url, model, api_key in attempts:
+        if not api_key:
+            continue
+        try:
+            result = await _llm_no_timeout(text, target, base_url, model, api_key, system)
+            if result:
+                return _clean_output(result, target)
+        except (TranslationError, httpx.HTTPError):
+            continue
+    return ""
+
+
 async def maybe_translate(text: str, enabled: bool, target: str | None = None) -> tuple[str, bool]:
     """Return (text, was_translated). Never raises: the original is kept on failure."""
     if not enabled or not text or not text.strip():

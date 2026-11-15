@@ -172,7 +172,11 @@ async def run_job(
         topic_rows = _load_topics()
         selected_topics = {int(x) for x in db.load_list(job.get("topic_ids"))}
         window = int(job.get("window_hours") or 24)
-        max_items = max_items_override or int(job.get("max_items") or 8)
+        max_items = (
+            max_items_override
+            if max_items_override is not None
+            else int(job.get("max_items") or 8)
+        )
         translate_enabled = bool(int(job.get("translate", 1)))
         include_summary = bool(int(job.get("include_summary", 1)))
         send_image = bool(int(job.get("send_image", 1)))

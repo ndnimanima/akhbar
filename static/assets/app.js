@@ -31,6 +31,7 @@
     creators: [],
     archive: { status: "all", q: "" },
     draft: null,
+    video: { settings: null, status: null, jobs: [], polling: null, activeJob: null },
   };
 
   const COLORS = {
@@ -194,6 +195,7 @@
     hash: '<path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/>',
     bookmark: '<path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4.5L5 21V4a1 1 0 0 1 1-1z"/>',
     message: '<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.9-.9L3 21l1.9-4.6A8.4 8.4 0 0 1 12 3h1a8.4 8.4 0 0 1 8 8.5z"/>',
+    video: '<rect x="2" y="5" width="15" height="14" rx="2.5"/><path d="M17 10.5 22 7v10l-5-3.5"/>',
   };
   const FILLED = {
     play: '<path d="M7 4.5 19.5 12 7 19.5z"/>',
@@ -346,6 +348,11 @@
         { icon: "activity", label: "nav.sub.overview", desc: "nav.sub.overview_d", page: "dashboard" },
         { icon: "play", label: "nav.sub.run_all", desc: "nav.sub.run_all_d", act: "runAll" },
         { icon: "list", label: "nav.logs", desc: "nav.sub.logs_d", page: "logs" },
+      ]},
+      { id: "video", icon: "video", items: [
+        { icon: "video", label: "nav.video", page: "video" },
+        { icon: "plus", label: "nav.sub.video_manual", desc: "nav.sub.video_manual_d", page: "video", anchor: "videoForm" },
+        { icon: "zap", label: "nav.sub.video_smart", desc: "nav.sub.video_smart_d", page: "video" },
       ]},
       { id: "feeds", icon: "rss", items: [
         { icon: "list", label: "nav.sub.list", page: "feeds" },
@@ -517,6 +524,7 @@
     channels: renderChannels,
     jobs: renderJobs,
     archive: renderArchive,
+    // "video" is registered by static/assets/video.js through Rozaneh.registerPage
     logs: renderLogs,
     settings: renderSettings,
     admin: renderAdmin,
@@ -652,7 +660,6 @@
 
     let html = pageHead(t("dash.title"), t("dash.subtitle"), headActions);
 
-    if (d.settings && d.settings.theme) { /* nothing */ }
     if (S.settings.password_is_bootstrap) {
       html +=
         '<div class="banner">' + ico("alert") + "<span>" + h(t("settings.bootstrap_warning")) +
@@ -969,11 +976,6 @@
           '<div class="tiny mute">' + h(isFa() ? p.hint_fa : p.hint_en) + "</div>" +
           '<div class="tiny mute">' + h(isFa() ? p.token_hint_fa : p.token_hint_en) + "</div></div>"
         ).join("") + "</div></div></section>";
-  }
-
-  function num(v) {
-    const n = Number(v);
-    return Number.isFinite(n) ? String(n) : String(v);
   }
 
   function platformRule(id) {
@@ -1410,6 +1412,7 @@
       "</div></div>";
   }
 
+
   /* ── admin ────────────────────────────────────────────────────────────── */
 
   async function renderAdmin(view) {
@@ -1443,13 +1446,11 @@
     const rows = S.feeds.map((f, idx) => {
       const col = colorOf(f.color);
       return (
-        '<div class="frow" data-feed="' + f.id + '" style="grid-template-columns:34px minmax(0,1fr) 84px 96px 100px 132px">' +
+        '<div class="frow" data-feed="' + f.id + '" style="grid-template-columns:34px minmax(0,1fr) 90px 132px">' +
           '<div class="favatar" style="width:30px;height:30px;background:' + tint(col, .14) + ";border-color:" + tint(col, .4) + ";color:" + col + ';font-size:14px">' + h(f.icon) + "</div>" +
-          '<div class="fname"><b dir="auto">' + h(f.title) + '</b><span>' + h(f.url) + "</span></div>" +
-          '<input type="text" value="' + h(f.icon) + '" maxlength="4" dir="ltr" style="text-align:center;min-height:30px;padding:2px 4px" data-act="admin.icon" data-id="' + f.id + '" title="' + h(t("admin.icon")) + '">' +
-          '<div class="inline" style="gap:5px"><span class="color-dot" style="background:' + col + '"></span><select data-act="admin.color" data-id="' + f.id + '" style="min-height:30px;padding:2px 8px" title="' + h(t("admin.color")) + '">' +
-            Object.keys(COLORS).map((ck) => '<option value="' + ck + '"' + (ck === f.color ? " selected" : "") + ">" + ck + "</option>").join("") + "</select></div>" +
-          '<button class="toggle' + (Number(f.show_url) ? " on" : "") + '" data-act="admin.showurl" data-id="' + f.id + '" title="' + h(t("admin.show_url")) + '"></button>' +
+          '<div class="fname"><b dir="auto">' + h(f.title) + "</b><span>" + h(f.show_url ? f.url : "••••••") + "</span></div>" +
+          '<div class="inline" style="gap:6px"><span class="color-dot" style="background:' + col + '"></span>' +
+          '<span class="tiny mute">' + h(f.color || "slate") + "</span></div>" +
           '<div class="iact" style="justify-content:flex-end">' +
             (idx > 0 ? iconBtn("arrowUp", "feed.up", f.id, "ghost", t("admin.move_up")) : "") +
             (idx < S.feeds.length - 1 ? iconBtn("arrowDown", "feed.down", f.id, "ghost", t("admin.move_down")) : "") +
@@ -1466,8 +1467,8 @@
         '<div class="card-body"><div class="tiny mute" style="margin-bottom:12px">' + h(t("admin.links_hint")) + "</div></div>" +
         '<div class="card-body flush"><div class="rows">' +
         (S.feeds.length
-          ? '<div class="frow fhead" style="grid-template-columns:34px minmax(0,1fr) 84px 96px 100px 132px"><div></div><div>' + h(t("common.source")) +
-            "</div><div>" + h(t("admin.icon")) + "</div><div>" + h(t("admin.color")) + "</div><div>" + h(t("admin.show_url")) +
+          ? '<div class="frow fhead" style="grid-template-columns:34px minmax(0,1fr) 90px 132px"><div></div><div>' + h(t("common.source")) +
+            "</div><div>" + h(t("admin.color")) +
             '</div><div style="text-align:end">' + h(t("common.actions")) + "</div></div>" + rows
           : emptyBox("link", t("feeds.empty"), t("feeds.empty_hint"))) +
         "</div></div></section>"
@@ -1493,11 +1494,9 @@
         card(t("common.theme"), "sun", '<div class="opt-grid">' + themeCards + "</div>") +
         card(t("common.language"), "globe", '<div class="opt-grid">' + langCards + "</div>") +
       '</div><div class="stack">' +
-        card(t("admin.tab.appearance"), "sliders",
-          '<form data-form="admin-appearance" id="setAppear">' +
-          field(t("common.timezone"), '<input class="ltr" type="text" name="timezone" value="' + h(s.timezone) + '">') +
-          field(t("settings.panel_title"), '<input type="text" name="panel_title" value="' + h(s.panel_title) + '" dir="auto">') +
-          '<button class="btn primary" data-act="submit" data-form-id="setAppear">' + ico("check") + "<span>" + h(t("common.save")) + "</span></button></form>",
+        card(t("admin.panel_settings"), "sliders",
+          '<p class="tiny mute" style="margin:0 0 12px">' + h(t("admin.panel_settings_hint")) + "</p>" +
+          '<button class="btn ghost" data-act="nav.item" data-page="settings">' + ico("sliders") + "<span>" + h(t("settings.title")) + "</span></button>",
           false) +
       "</div></div>"
     );
@@ -1662,6 +1661,10 @@
   async function submitForm(form) {
     const kind = form.dataset.form;
     const v = fd(form);
+
+    // panel modules (static/assets/video.js …) register their own forms
+    const moduleForm = window.Rozaneh && window.Rozaneh.forms && window.Rozaneh.forms[kind];
+    if (moduleForm) { await moduleForm(form, v); return; }
 
     if (kind === "feed") {
       const payload = {
@@ -1833,22 +1836,6 @@
       location.replace("/login");
     },
     "nav.item": (el) => go(el.dataset.page, el.dataset.tab, el.dataset.anchor),
-    "mobile.toggle": (el) => {
-      const g = el.closest(".mgroup");
-      g.classList.toggle("open");
-    },
-    "reload": async () => { await render(); toast(t("common.refresh"), "info"); },
-    "tg": (el) => {
-      el.classList.toggle("on");
-      el.setAttribute("aria-pressed", el.classList.contains("on") ? "true" : "false");
-    },
-    "modal.close": () => closeModal(),
-    "modal.backdrop": (el, ev) => { if (ev && ev.target === el) closeModal(); },
-    "modal.yes": async () => { closeModal(); },
-    "submit": (el) => {
-      const form = document.getElementById(el.dataset.formId);
-      if (form) submitForm(form).catch((e) => toast(errMsg(e), "err"));
-    },
     "runAll": async () => {
       const jobs = (await loadJobs()).filter((j) => Number(j.enabled));
       if (!jobs.length) { toast(t("jobs.empty"), "info"); return; }
@@ -2229,7 +2216,37 @@
     }
   }
 
-  window.Rozaneh = { go: go, render: render, state: S, toast: toast };
+  /* Public bridge — static/assets/video.js (and any future panel module)
+     builds its page with these exact helpers, so there is one source of
+     truth for escaping, i18n, HTTP and rendering. */
+  window.Rozaneh = {
+    go: go,
+    render: render,
+    state: S,
+    toast: toast,
+    reload: () => render(),
+    $: $,
+    h: h,
+    t: t,
+    num: num,
+    ico: ico,
+    api: api,
+    errMsg: errMsg,
+    confirmModal: confirmModal,
+    field: field,
+    card: card,
+    pageHead: pageHead,
+    toggleEl: toggleEl,
+    emptyBox: emptyBox,
+    fmtDate: fmtDate,
+    fmtLogTime: fmtLogTime,
+    ICO_CHEV: ICO_CHEV,
+    fd: fd,
+    pages: PAGES,
+    actions: ACTIONS,
+    forms: {},
+    registerPage: (id, fn) => { PAGES[id] = fn; },
+  };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
 })();

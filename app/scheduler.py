@@ -136,6 +136,13 @@ def is_due(job: dict, now: datetime | None = None) -> bool:
 async def tick() -> None:
     now = datetime.now(timezone.utc)
     STATE["last_tick"] = now.replace(microsecond=0).isoformat()
+    # smart video analysis runs on the same tick (no-op unless enabled)
+    try:
+        from . import video as video_mod
+
+        await video_mod.maybe_smart_tick()
+    except Exception:  # noqa: BLE001 — video must never break the news tick
+        logger.exception("video smart tick failed")
     jobs = db.query("SELECT * FROM jobs WHERE enabled = 1")
     for job in jobs:
         if not is_due(job, now):
@@ -145,7 +152,7 @@ async def tick() -> None:
         try:
             report = await pipeline.run_job(job, force=True)
             if not report.get("ok"):
-                db.log(job["id"], f"⚠️ {report.get('error')}", level="warn")
+                db.log(job["id"], f"⚠️ {report.get('error_code') or 'run_failed'}", level="warn")
         except Exception as exc:  # noqa: BLE001 - scheduler must never die
             logger.exception("job %s failed", job.get("id"))
             db.log(job["id"], f"💥 خطای غیرمنتظره: {exc}", level="error")

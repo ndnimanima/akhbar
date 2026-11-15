@@ -130,9 +130,24 @@ CREATE TABLE IF NOT EXISTS translations (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS video_analyses (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    url         TEXT NOT NULL DEFAULT '',
+    title       TEXT DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'running',
+    mode        TEXT NOT NULL DEFAULT 'manual',
+    stage       TEXT DEFAULT 'queued',
+    error       TEXT DEFAULT '',
+    summary     TEXT DEFAULT '',
+    report      TEXT DEFAULT '{}',
+    created_at  TEXT NOT NULL,
+    finished_at TEXT DEFAULT ''
+);
+
 CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_items_status  ON items(status);
 CREATE INDEX IF NOT EXISTS idx_logs_created  ON logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_video_created ON video_analyses(created_at DESC);
 """
 
 DEFAULT_TOPICS: list[tuple[str, str, str, str]] = [
@@ -172,6 +187,13 @@ DEFAULT_SETTINGS = {
     "max_message_chars": "3800",
     "signature_enabled": "1",
     "feedback_webhook": "",
+    # video analyzer: smart (auto) mode is OFF by default; manual always works.
+    # There is intentionally no timeout setting — analysis runs as long as needed.
+    "video_smart": "0",
+    "video_interval_minutes": "30",
+    "video_summarize": "1",
+    "video_frames": "1",
+    "video_smart_last_run": "",
     # security
     "password_hash": "",
     "password_salt": "",

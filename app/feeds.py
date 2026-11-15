@@ -89,9 +89,7 @@ def _entry_image(entry: Any) -> str:
 
 def _upgrade_image(url: str) -> str:
     """Ask image CDNs for a larger variant (240px thumbs are useless on a channel)."""
-    url = re.sub(r"(ichef\.bbci\.co\.uk/.*?/(?:ws|standard|news))/(\d{2,4})/", r"\1/800/", url)
-    url = re.sub(r"([?&](?:w|width|resize|size)=\d{2,3})(?=&|$)", r"\1", url)
-    return url
+    return re.sub(r"(ichef\.bbci\.co\.uk/.*?/(?:ws|standard|news))/(\d{2,4})/", r"\1/800/", url)
 
 
 META_TAG_RE = re.compile(r"<meta\s[^>]*>", re.I)
