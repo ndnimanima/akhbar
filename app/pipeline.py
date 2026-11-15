@@ -10,7 +10,10 @@ news never runs out of budget because the newest items happened to be political.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import io
 from datetime import datetime, timezone
+from urllib.parse import urldefrag
 
 from . import db, feeds, publish, topics as topics_mod, translate
 
@@ -102,6 +105,88 @@ def _update_item(item_id: int, **fields) -> None:
     db.execute(f"UPDATE items SET {assignments} WHERE id = ?", (*fields.values(), item_id))
 
 
+def _image_hash(url: str) -> str:
+    return hashlib.sha256(urldefrag(url.strip())[0].encode("utf-8")).hexdigest()
+
+
+def _visual_fingerprint(data: bytes) -> tuple[str, str]:
+    """Compact conservative near-duplicate signature; skip oversized/flat images."""
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(io.BytesIO(data)) as original:
+            if original.width * original.height > 20_000_000:
+                return "", ""
+            original.draft("RGB", (128, 128))
+            image = ImageOps.exif_transpose(original).convert("RGB")
+            image.thumbnail((128, 128))
+            color = image.resize((1, 1)).getpixel((0, 0))
+            gray = image.convert("L").resize((17, 8))
+            pixels = list(gray.get_flattened_data() if hasattr(gray, "get_flattened_data") else gray.getdata())
+            if max(pixels) - min(pixels) < 30:
+                return "", ""
+            bits = 0
+            for y in range(8):
+                for x in range(16):
+                    bits = (bits << 1) | int(pixels[y * 17 + x] > pixels[y * 17 + x + 1])
+            return f"{bits:032x}", ",".join(str(v) for v in color)
+    except Exception:  # noqa: BLE001 — fingerprint failure must not block publication
+        return "", ""
+
+
+def _image_seen(destination_id: int, image_url: str, data_hash: str,
+                visual_hash: str = "", visual_color: str = "") -> bool:
+    url_hash = _image_hash(image_url)
+    row = db.query_one(
+        "SELECT 1 AS found FROM published_images WHERE destination_id = ? AND "
+        "(image_url_hash = ? OR (image_data_hash != '' AND image_data_hash = ?)) LIMIT 1",
+        (destination_id, url_hash, data_hash),
+    )
+    if row:
+        return True
+    if visual_hash and visual_color:
+        recent = db.query("SELECT visual_hash, visual_color FROM published_images "
+                          "WHERE destination_id=? AND visual_hash != '' ORDER BY created_at DESC LIMIT 100",
+                          (destination_id,))
+        for prior in recent:
+            try:
+                distance = (int(visual_hash, 16) ^ int(prior["visual_hash"], 16)).bit_count()
+                color = [int(c) for c in visual_color.split(",")]
+                old_color = [int(c) for c in prior["visual_color"].split(",")]
+                if distance <= 3 and len(color) == len(old_color) == 3 and max(abs(a - b) for a, b in zip(color, old_color)) <= 12:
+                    return True
+            except (ValueError, TypeError):
+                continue
+    # Previous releases recorded the URL and successful destinations, but not
+    # whether the photo or a text fallback succeeded. Be conservative on upgrade.
+    rows = db.query("SELECT destinations FROM items WHERE status='sent' AND image=? ORDER BY id DESC LIMIT 50", (image_url,))
+    return any(any(str(d.get("id")) == str(destination_id) and d.get("ok")
+                   for d in db.load_list(row.get("destinations")) if isinstance(d, dict)) for row in rows)
+
+
+def _remember_image(destination_id: int, image_url: str, data_hash: str,
+                    visual_hash: str = "", visual_color: str = "") -> None:
+    db.execute("INSERT OR REPLACE INTO published_images(destination_id,image_url_hash,image_data_hash,visual_hash,visual_color,created_at) VALUES(?,?,?,?,?,?)",
+               (destination_id, _image_hash(image_url), data_hash, visual_hash, visual_color, db.now_iso()))
+
+
+async def _deliver_item(destination: dict, item: dict, image, image_digest: str,
+                        visual_hash: str = "", visual_color: str = "") -> tuple[bool, str, bool, bool]:
+    """Send exactly one post when delivery is certain; repeated photos become text."""
+    platform = (destination.get("platform") or "").lower()
+    can_photo = bool(image and item.get("image") and publish.supports_photo(platform))
+    repeated = can_photo and _image_seen(destination["id"], item["image"], image_digest, visual_hash, visual_color)
+    if can_photo and not repeated:
+        ok, detail = await publish.send_photo(destination, item["image"],
+                                              publish.render_caption(item, destination), image=image)
+        if ok:
+            _remember_image(destination["id"], item["image"], image_digest, visual_hash, visual_color)
+            return ok, detail, True, False
+        if publish.delivery_uncertain(detail):
+            return ok, detail, False, False
+    ok, detail = await publish.send_message(destination, publish.render_item(item, destination))
+    return ok, detail, False, bool(repeated)
+
+
 async def run_job(
     job: dict,
     *,
@@ -131,6 +216,8 @@ async def run_job(
             "failed": 0,
             "skipped": 0,
             "images": 0,
+            "repeated_images": 0,
+            "summary_missing": 0,
             "previews": [],
             "events": [],
             "lines": [],
@@ -143,6 +230,8 @@ async def run_job(
                 "run_dry": "حالت آزمایشی (بدون ارسال)",
                 "feed_error": f"منبع «{params.get('feed')}» خوانده نشد: {params.get('error')}",
                 "cap_note": f"{params.get('eligible')} خبر واجد شرایط بود؛ {params.get('taken')} خبر اول انتخاب شد",
+                "summary_missing": f"متن تکمیلی «{params.get('title')}» از منبع در دسترس نبود",
+                "repeated_image": f"تصویر تکراری «{params.get('title')}» برای کانال «{params.get('destination')}» حذف شد؛ خبر متنی ارسال می‌شود",
                 "no_fresh": "خبر تازه‌ای متناسب با موضوعات انتخابی پیدا نشد",
                 "no_feeds": "منبع خبری فعالی انتخاب نشده است",
                 "no_destinations": "کانال مقصد فعالی انتخاب نشده است",
@@ -275,6 +364,23 @@ async def run_job(
 
         # ── 3) translate + publish ───────────────────────────────────────────
         for item in eligible:
+            item["_include_summary"] = include_summary
+            needs_summary = include_summary and not feeds.summary_is_useful(item.get("summary", ""), item.get("title", ""))
+            needs_image = send_image and not item.get("image")
+            if (needs_summary or needs_image) and item.get("link"):
+                details = await feeds.article_details(item["link"])
+                if needs_summary and feeds.summary_is_useful(details.get("summary", ""), item.get("title", ""), min_length=30):
+                    old_summary = item.get("summary") or ""
+                    if len(details["summary"]) > len(old_summary) or old_summary.casefold().strip(" .!؟") == (item.get("title") or "").casefold().strip(" .!؟"):
+                        item["summary"] = details["summary"]
+                if needs_image and details.get("image"):
+                    item["image"] = details["image"]
+            if include_summary and feeds.clean_text(item.get("summary", ""), 900).casefold().strip(" .!؟") == feeds.clean_text(item.get("title", ""), 900).casefold().strip(" .!؟"):
+                item["summary"] = ""
+            if include_summary and not (item.get("summary") or "").strip():
+                item["_summary_unavailable"] = True
+                report["summary_missing"] += 1
+                note("summary_missing", level="warn", title=(item.get("title") or "")[:60])
             best_topic = item.pop("_topic", None)
             label = topics_mod.topic_label(best_topic)
             item["topic"] = (
@@ -293,11 +399,6 @@ async def run_job(
                     report["translated"] += 1
                 if summary_fa:
                     summary_fa, _ = await translate.maybe_translate(summary_fa, True)
-            if send_image and not item.get("image") and item.get("link"):
-                item["image"] = await feeds.og_image(item["link"])
-                if item["image"]:
-                    report["images"] += 1
-
             item["title_fa"] = title_fa if title_fa != item.get("title") else ""
             item["summary_fa"] = summary_fa if summary_fa != item.get("summary") else ""
 
@@ -326,26 +427,31 @@ async def run_job(
 
             delivered: list[dict] = []
             failures: list[str] = []
+            image = None
+            image_checked = False
+            image_digest = ""
+            visual_hash, visual_color = "", ""
             for destination in destinations:
                 if not _destination_accepts(destination, item):
                     continue
                 platform = (destination.get("platform") or "").lower()
                 use_photo = send_image and bool(item.get("image")) and publish.supports_photo(platform)
-                if use_photo:
-                    ok, detail = await publish.send_photo(
-                        destination, item["image"], publish.render_caption(item, destination)
-                    )
-                    if ok:
-                        report["images"] += 1
-                    else:
-                        # a broken image must never cost us the news item
-                        ok, detail = await publish.send_message(
-                            destination, publish.render_item(item, destination)
-                        )
-                else:
-                    ok, detail = await publish.send_message(
-                        destination, publish.render_item(item, destination)
-                    )
+                if use_photo and not image_checked:
+                    image_checked = True
+                    image = await publish.fetch_image(item["image"])
+                    if image:
+                        image_digest = hashlib.sha256(image[0]).hexdigest()
+                        visual_hash, visual_color = await asyncio.to_thread(_visual_fingerprint, image[0])
+                # An unavailable or duplicate image becomes one text post.
+                ok, detail, photo_sent, repeated = await _deliver_item(
+                    destination, item, image if use_photo else None, image_digest, visual_hash, visual_color
+                )
+                if photo_sent:
+                    report["images"] += 1
+                if repeated:
+                    report["repeated_images"] += 1
+                    note("repeated_image", level="info", title=(item.get("title") or "")[:60],
+                         destination=destination.get("name", ""))
                 delivered.append(
                     {"id": destination["id"], "name": destination.get("name"), "ok": ok, "detail": detail}
                 )
@@ -411,6 +517,11 @@ def _finish_job(job: dict, report: dict) -> None:
 
 
 async def resend_item(item_id: int, destination_ids: list[int] | None = None) -> dict:
+    async with RUN_LOCK:
+        return await _resend_item(item_id, destination_ids)
+
+
+async def _resend_item(item_id: int, destination_ids: list[int] | None = None) -> dict:
     item = db.query_one("SELECT * FROM items WHERE id = ?", (item_id,))
     if not item:
         return {"ok": False, "error_code": "item_not_found"}
@@ -422,20 +533,11 @@ async def resend_item(item_id: int, destination_ids: list[int] | None = None) ->
     if not destinations:
         return {"ok": False, "error_code": "no_destinations"}
     results = []
+    image = await publish.fetch_image(item["image"]) if item.get("image") else None
+    image_digest = hashlib.sha256(image[0]).hexdigest() if image else ""
+    visual_hash, visual_color = await asyncio.to_thread(_visual_fingerprint, image[0]) if image else ("", "")
     for destination in destinations:
-        platform = (destination.get("platform") or "").lower()
-        if item.get("image") and publish.supports_photo(platform):
-            ok, detail = await publish.send_photo(
-                destination, item["image"], publish.render_caption(item, destination)
-            )
-            if not ok:
-                ok, detail = await publish.send_message(
-                    destination, publish.render_item(item, destination)
-                )
-        else:
-            ok, detail = await publish.send_message(
-                destination, publish.render_item(item, destination)
-            )
+        ok, detail, _, _ = await _deliver_item(destination, item, image, image_digest, visual_hash, visual_color)
         results.append(
             {"id": destination["id"], "name": destination.get("name"), "ok": ok, "detail": detail}
         )

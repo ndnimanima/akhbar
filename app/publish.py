@@ -417,11 +417,9 @@ PLATFORMS = {
 
 
 async def _send_photo_telegram(destination: dict, image, caption: str) -> tuple[bool, str]:
-    mode = _parse_mode(destination)
     chat_id = _chat_of(destination)
     payload: dict[str, Any] = {"chat_id": chat_id, "caption": caption}
-    if mode:
-        payload["parse_mode"] = mode
+    # Captions are rendered as plain text; do not re-interpret them as HTML.
     if image:
         data, filename, mime = image
         files = {"photo": (filename, data, mime)}
@@ -442,7 +440,7 @@ async def _send_photo_bale(destination: dict, image, caption: str, photo_url: st
                 client,
                 "POST",
                 url,
-                data={"chat_id": chat_id, "caption": strip_tags(caption)},
+                data={"chat_id": chat_id, "caption": caption},
                 files={"photo": (filename, data, mime)},
             )
         return ok, detail
@@ -452,7 +450,7 @@ async def _send_photo_bale(destination: dict, image, caption: str, photo_url: st
                 client,
                 "POST",
                 url,
-                json={"chat_id": chat_id, "photo": photo_url, "caption": strip_tags(caption)},
+                json={"chat_id": chat_id, "photo": photo_url, "caption": caption},
             )
         return ok, detail
     return False, "image_unavailable"
@@ -468,18 +466,17 @@ async def _send_photo_eitaa(destination: dict, image, caption: str, photo_url: s
                 client,
                 "POST",
                 url,
-                data={"chat_id": chat_id, "caption": strip_tags(caption)},
+                data={"chat_id": chat_id, "caption": caption},
                 files={"file": (filename, data, mime)},
             )
-        if ok:
-            return ok, detail
+        return ok, detail
     # eitaayar also accepts a public URL or a file_id in the same field
     async with _client() as client:
         ok, detail, _ = await _request(
             client,
             "POST",
             url,
-            data={"chat_id": chat_id, "file": photo_url, "caption": strip_tags(caption)},
+            data={"chat_id": chat_id, "file": photo_url, "caption": caption},
         )
     return ok, detail
 
@@ -488,7 +485,7 @@ async def _send_photo_rubika(destination: dict, image, caption: str, photo_url: 
     """requestSendFile → POST bytes to the returned upload_url → sendFile."""
     token = _token_of(destination)
     chat_id = _chat_of(destination)
-    text = strip_tags(caption)
+    text = caption
     async with _client() as client:
         ok, detail, body = await _request(
             client,
@@ -520,20 +517,25 @@ async def _send_photo_rubika(destination: dict, image, caption: str, photo_url: 
     return ok, detail
 
 
-async def send_photo(destination: dict, photo_url: str, caption: str) -> tuple[bool, str]:
-    """Send one photo + caption; the caller falls back to text on failure."""
+def delivery_uncertain(detail: str) -> bool:
+    """A timeout/server error might have occurred after the post was accepted."""
+    return str(detail or "").startswith(("network_error:", "http_5"))
+
+
+async def send_photo(destination: dict, photo_url: str, caption: str, *,
+                     image: tuple[bytes, str, str] | None = None) -> tuple[bool, str]:
+    """Send one photo + caption; callers may pass already downloaded bytes."""
     platform = (destination.get("platform") or "telegram").lower()
     rules = rules_for(platform)
     if rules["photo"] == "none":
         return await send_message(destination, caption)
-    caption = _truncate(strip_tags(caption), platform_limit(platform, "caption"))
+    caption = _truncate_units(caption, platform_limit(platform, "caption"))
     await _throttle(destination)
-    image = None
-    if photo_url:
+    if image is None and photo_url:
         image = await fetch_image(photo_url)
     if platform == "telegram":
         ok, detail = await _send_photo_telegram(destination, image, caption)
-        if not ok and photo_url:
+        if not ok and not image and photo_url and not delivery_uncertain(detail):
             # last resort: let Telegram fetch the URL itself (JPEG only, ≤5 MB)
             async with _client() as client:
                 ok, detail, _ = await _request(
@@ -668,7 +670,9 @@ def render_item(item: dict, destination: dict, with_signature: bool | None = Non
     use_html = _use_html(destination)
 
     title = item.get("title_fa") or item.get("title") or ""
-    summary = (item.get("summary_fa") or item.get("summary") or "").strip()
+    summary = (item.get("summary_fa") or item.get("summary") or "").strip() if item.get("_include_summary", True) else ""
+    if not summary and item.get("_summary_unavailable"):
+        summary = "متن تکمیلی این خبر از منبع در دسترس نبود."
     if len(summary) > 420:
         summary = summary[:417].rstrip() + "…"
 
@@ -709,28 +713,51 @@ def render_item(item: dict, destination: dict, with_signature: bool | None = Non
     return "\n\n".join(p for p in parts if p)
 
 
+def _utf16_len(text: str) -> int:
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _truncate_units(text: str, limit: int) -> str:
+    if _utf16_len(text) <= limit:
+        return text
+    if limit <= 0:
+        return ""
+    result, used = [], 0
+    for char in text:
+        width = _utf16_len(char)
+        if used + width > limit - 1:
+            break
+        result.append(char)
+        used += width
+    return "".join(result).rstrip() + "…"
+
+
 def render_caption(item: dict, destination: dict, with_signature: bool | None = None) -> str:
-    """Shorter variant used as the photo caption — the link is never cut."""
-    platform = (destination.get("platform") or "telegram").lower()
-    limit = platform_limit(platform, "caption")
-    message = render_item(item, destination, with_signature)
-    if len(message) <= limit:
-        return message
-    summary = (item.get("summary_fa") or item.get("summary") or "").strip()
+    """One plain-text photo caption, prioritising headline and explanation.
+
+    Telegram's caption budget counts UTF-16 units. Never cut a source URL;
+    omit it if there is not enough room, instead of sacrificing the summary.
+    """
+    limit = platform_limit((destination.get("platform") or "telegram").lower(), "caption")
+    title = _truncate_units(str(item.get("title_fa") or item.get("title") or "").strip(), min(240, limit))
+    summary = (item.get("summary_fa") or item.get("summary") or "").strip() if item.get("_include_summary", True) else ""
+    if not summary and item.get("_summary_unavailable"):
+        summary = "متن تکمیلی این خبر از منبع در دسترس نبود."
+    parts = [title] if title else []
+    if summary:
+        room = max(0, limit - _utf16_len("\n\n".join(parts)) - 2)
+        if room:
+            parts.append(_truncate_units(summary, min(420, room)))
     link = item.get("link") or ""
-    feed_title = item.get("feed_title") or "source"
-    title = item.get("title_fa") or item.get("title") or ""
-    use_html = _use_html(destination)
-    tail = (
-        f'🔗 <a href="{html.escape(link, quote=True)}">{html.escape(feed_title, quote=False)}</a>'
-        if (use_html and link)
-        else (f"🔗 {feed_title}: {link}" if link else "")
-    )
-    head = f"<b>{html.escape(title, quote=False)}</b>" if use_html else title
-    room = max(0, limit - len(head) - len(tail) - 4)
-    body = _truncate(summary, room) if room > 40 else ""
-    parts = [p for p in (head, body, tail) if p]
-    return "\n\n".join(parts)[:limit]
+    extras = [item.get("topic") or "", f"🔗 {item.get('feed_title') or 'source'}: {link}" if link else ""]
+    if with_signature is None:
+        with_signature = _signature_enabled()
+    if with_signature:
+        extras.extend([(destination.get("footer") or "").strip(), (db.get_setting("global_footer") or "").strip()])
+    for extra in extras:
+        if extra and _utf16_len("\n\n".join(parts + [extra])) <= limit:
+            parts.append(extra)
+    return "\n\n".join(parts)
 
 
 def rules_payload() -> list[dict]:

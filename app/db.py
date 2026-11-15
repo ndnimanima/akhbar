@@ -112,6 +112,17 @@ CREATE TABLE IF NOT EXISTS items (
     posted_at     TEXT DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS published_images (
+    destination_id INTEGER NOT NULL,
+    image_url_hash TEXT NOT NULL,
+    image_data_hash TEXT NOT NULL DEFAULT '',
+    visual_hash TEXT NOT NULL DEFAULT '',
+    visual_color TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (destination_id, image_url_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_published_images_content ON published_images(destination_id, image_data_hash);
+
 CREATE TABLE IF NOT EXISTS logs (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id     INTEGER DEFAULT NULL,
