@@ -6,6 +6,14 @@ const dom = new JSDOM(fs.readFileSync('static/index.html', 'utf8'), {url: 'https
 const {window} = dom, {document} = window;
 window.scrollTo = () => {};
 const calls = [];
+let uploadXhr;
+window.XMLHttpRequest = class {
+  constructor() { this.upload = {}; uploadXhr = this; }
+  open(method, url) { this.method = method; this.url = url; }
+  setRequestHeader() {}
+  send(file) { this.file = file; calls.push({url:this.url, method:this.method, body:file}); }
+  abort() { this.onabort(); }
+};
 let cfg = { smart: false, interval_minutes: 30, ai_base_url: 'https://api.openai.com/v1', ai_model: 'gpt-4o-mini', ai_key_set: false, ai_vision: false };
 window.fetch = async (url, init) => {
   calls.push({url, method: init.method, body: typeof init.body === 'string' ? JSON.parse(init.body) : init.body});
@@ -58,9 +66,23 @@ const q = s => {const el = document.querySelector(s); assert.ok(el, s); return e
   Object.defineProperty(upload, 'files', {value: [new window.File(['video'], 'sample.mp4', {type:'video/mp4'})]});
   upload.dispatchEvent(new window.Event('change', {bubbles:true}));
   await waitFor(() => calls.some(c => c.url.startsWith('/api/video/upload?')));
+  uploadXhr.upload.onprogress({loaded: 2, total: 5, lengthComputable:true});
+  assert.equal(q('#videoUploadProgress progress').value, 40);
+  assert.equal(q('[data-act="video.pick"]').disabled, true);
+  uploadXhr.upload.onprogress({loaded: 5, total: 5, lengthComputable:true});
+  assert.equal(q('#videoUploadProgress progress').value, 100);
+  assert.ok(q('#videoUploadProgress').textContent.includes('آپلود کامل'));
+  uploadXhr.status=200; uploadXhr.responseText=JSON.stringify({ok:true,job_id:10}); uploadXhr.onload();
   await tick(); await tick();
   assert.equal(window.Rozaneh.state.video.activeJob, 10);
   assert.ok(!document.querySelector('#toasts').textContent.includes('render is not defined'));
+  const secondUpload = q('#videoFile');
+  Object.defineProperty(secondUpload, 'files', {value: [new window.File(['sample'], 'second.mp4', {type:'video/mp4'})]});
+  secondUpload.dispatchEvent(new window.Event('change', {bubbles:true}));
+  await waitFor(() => document.querySelector('[data-act="video.uploadCancel"]'));
+  q('[data-act="video.uploadCancel"]').click(); await tick();
+  assert.equal(document.querySelector('#videoUploadProgress progress'), null);
+  assert.equal(q('[data-act="video.pick"]').disabled, false);
   const provider = q('#videoAiSettings [name="provider"]');
   provider.value = 'gemini'; provider.dispatchEvent(new window.Event('change', {bubbles:true}));
   assert.equal(q('#videoAiSettings [name="base_url"]').value, 'https://generativelanguage.googleapis.com/v1beta');

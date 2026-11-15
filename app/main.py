@@ -1372,9 +1372,8 @@ async def video_upload(request: Request, filename: str = "", title: str = "",
                     shutil.rmtree(tmpdir, ignore_errors=True)
                     fail("file_too_large")
                 fh.write(chunk)
-    except HTTPException:
-        raise
-    except Exception:
+    except BaseException:
+        # Includes client disconnects and task cancellation during streaming.
         shutil.rmtree(tmpdir, ignore_errors=True)
         raise
     if total == 0:

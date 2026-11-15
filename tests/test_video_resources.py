@@ -94,5 +94,21 @@ class ResourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(len(reads), 20)
 
 
+class UploadCleanupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cancelled_upload_removes_incomplete_temp_file(self):
+        from app.main import video_upload
+        class Request:
+            async def stream(self):
+                yield b'data'
+                raise asyncio.CancelledError()
+        with tempfile.TemporaryDirectory() as tmp:
+            upload_dir = Path(tmp) / 'upload'
+            upload_dir.mkdir()
+            with patch('app.main.tempfile.mkdtemp', return_value=str(upload_dir)):
+                with self.assertRaises(asyncio.CancelledError):
+                    await video_upload(Request(), filename='test.mp4', title='', _=None)
+            self.assertFalse(upload_dir.exists())
+
+
 if __name__ == '__main__':
     unittest.main()
