@@ -1,4 +1,4 @@
-"""Rozaneh — runtime configuration (v1.03).
+"""Rozaneh — runtime configuration (v1.04).
 
 Environment driven so the same image runs on Railway, Docker or a VPS.
 Nothing secret ever lives in the repository.
@@ -13,7 +13,7 @@ APP_NAME = "Rozaneh"
 APP_NAME_FA = "روزنه"
 APP_TAGLINE = "From headline to channel, automatically"
 APP_TAGLINE_FA = "از سرخط خبر تا کانال، خودکار"
-VERSION = "1.03"
+VERSION = "1.04"
 VERSION_STEP = 0.01  # every release bumps the version by one hundredth
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -34,7 +34,7 @@ COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "0") == "1"
 HTTP_TIMEOUT = float(os.environ.get("HTTP_TIMEOUT", "20"))
 USER_AGENT = os.environ.get(
     "USER_AGENT",
-    "Mozilla/5.0 (compatible; Rozaneh/1.03; +https://github.com/)",
+    "Mozilla/5.0 (compatible; Rozaneh/1.04; +https://github.com/)",
 )
 
 TICK_SECONDS = int(os.environ.get("TICK_SECONDS", "15"))

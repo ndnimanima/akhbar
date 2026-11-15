@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
+import tempfile
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -13,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import config, db, feeds, pipeline, publish, scheduler, security, topics as topics_mod, translate
+from . import config, db, feeds, pipeline, publish, scheduler, security, topics as topics_mod, translate, video as video_mod
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("rozaneh")
@@ -191,6 +194,22 @@ class FeedbackPayload(BaseModel):
 class ImportPayload(BaseModel):
     payload: dict[str, Any]
     confirm: bool = False
+
+
+class VideoAnalyzePayload(BaseModel):
+    url: str = ""
+    title: str = ""
+    transcript: str = ""
+    mode: str = "manual"
+    wait: bool = False
+
+
+class VideoSettingsPayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    smart: bool | None = None
+    interval_minutes: int | None = None
+    summarize: bool | None = None
+    frames: bool | None = None
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
@@ -916,6 +935,8 @@ async def dashboard(_: None = auth) -> dict:
         "translated": count("SELECT COUNT(*) AS c FROM items WHERE title_fa != ''"),
         "items": count("SELECT COUNT(*) AS c FROM items"),
         "with_image": count("SELECT COUNT(*) AS c FROM items WHERE image != ''"),
+        "videos": count("SELECT COUNT(*) AS c FROM video_analyses WHERE status = 'done'"),
+        "videos_running": count("SELECT COUNT(*) AS c FROM video_analyses WHERE status = 'running'"),
     }
     jobs = [job_public(r) for r in db.query("SELECT * FROM jobs ORDER BY id")]
     upcoming = sorted([j for j in jobs if j["next_run"]], key=lambda j: j["next_run"])[:5]
@@ -996,7 +1017,11 @@ async def admin_export(include_items: int = 0, _: None = auth) -> dict:
         },
         "feeds": db.query("SELECT * FROM feeds ORDER BY sort_order, id"),
         "topics": db.query("SELECT * FROM topics ORDER BY id"),
-        "destinations": db.query("SELECT * FROM destinations ORDER BY id"),
+        # Bot tokens never leave the panel — not even in a backup file.
+        "destinations": [
+            {**row, "bot_token": ""}
+            for row in db.query("SELECT * FROM destinations ORDER BY id")
+        ],
         "jobs": db.query("SELECT * FROM jobs ORDER BY id"),
         "creators": creators_public(),
     }
@@ -1052,6 +1077,9 @@ async def admin_import(payload: ImportPayload, _: None = auth) -> dict:
     if data.get("destinations"):
         db.execute("DELETE FROM destinations")
         for row in data["destinations"]:
+            token = (row.get("bot_token") or "")
+            if "•" in token:
+                token = ""  # a masked token from the panel is not a real token
             db.execute(
                 """INSERT INTO destinations(name, platform, chat_id, bot_token, topic_filter, footer,
                                             parse_mode, enabled, created_at)
@@ -1060,7 +1088,7 @@ async def admin_import(payload: ImportPayload, _: None = auth) -> dict:
                     row.get("name", ""),
                     row.get("platform", "telegram"),
                     row.get("chat_id", ""),
-                    row.get("bot_token", ""),
+                    token,
                     row.get("topic_filter", ""),
                     row.get("footer", ""),
                     row.get("parse_mode", "HTML"),
@@ -1150,6 +1178,121 @@ async def feedback(payload: FeedbackPayload) -> dict:
         except Exception as exc:  # noqa: BLE001
             logger.warning("feedback webhook failed: %s", exc)
     return {"ok": True, "forwarded": forwarded}
+
+
+# ── video analyzer (no timeouts; manual + smart modes) ─────────────────────
+# Manual: POST /api/video/analyze starts a background job and returns its id.
+# Smart:  PATCH /api/video/settings {smart: true} lets the scheduler
+#         auto-analyse new video links. Calling the analyze API never flips
+#         the smart toggle — the two controls are independent on purpose.
+
+
+@app.get("/api/video/status")
+async def video_status(_: None = auth) -> dict:
+    return video_mod.status()
+
+
+@app.get("/api/video/settings")
+async def video_settings(_: None = auth) -> dict:
+    return {"settings": video_mod.settings()}
+
+
+@app.patch("/api/video/settings")
+async def patch_video_settings(payload: VideoSettingsPayload, _: None = auth) -> dict:
+    patch = payload.model_dump(exclude_unset=True)
+    return {"ok": True, "settings": video_mod.set_settings(patch)}
+
+
+@app.post("/api/video/analyze")
+async def video_analyze(payload: VideoAnalyzePayload, _: None = auth) -> dict:
+    url = (payload.url or "").strip()
+    transcript = (payload.transcript or "").strip()
+    if not url and not transcript:
+        fail("url_required")
+    if url and video_mod.classify_url(url) == "unknown" and not transcript:
+        fail("unsupported_source")
+    mode = (payload.mode or "manual").strip().lower()
+    if mode not in {"manual", "api", "auto"}:
+        mode = "manual"
+    if payload.wait:
+        # Synchronous path for API callers: awaited with NO timeout — the
+        # request simply stays open until the analysis is really finished.
+        try:
+            report = await video_mod.analyse(
+                url, title_hint=payload.title, transcript_hint=transcript
+            )
+        except video_mod.VideoError as exc:
+            fail(str(exc))
+        return {"ok": True, "report": report}
+    job_id = video_mod.start_analysis(
+        url, title_hint=payload.title, transcript_hint=transcript, mode=mode
+    )
+    return {"ok": True, "job_id": job_id}
+
+
+@app.post("/api/video/upload")
+async def video_upload(request: Request, filename: str = "", title: str = "",
+                      _: None = auth) -> dict:
+    """Analyse an uploaded video file sent as a raw body (no multipart needed).
+
+    The temp directory lives until the analysis finishes — the job reads the
+    file from disk, so deleting it early would break frame extraction.
+    """
+    suffix = Path(filename or "video.mp4").suffix.lower() or ".mp4"
+    if suffix not in video_mod.VIDEO_EXTS:
+        fail("unsupported_source")
+    tmpdir = Path(tempfile.mkdtemp(prefix="rozaneh-upload-"))
+    dest = tmpdir / ("video" + suffix)
+    total = 0
+    try:
+        with open(dest, "wb") as fh:
+            async for chunk in request.stream():
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > video_mod.MAX_DOWNLOAD_BYTES:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                    fail("file_too_large")
+                fh.write(chunk)
+    except HTTPException:
+        raise
+    except Exception:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        raise
+    if total == 0:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        fail("empty_file")
+
+    label = (title or filename or "ویدیوی آپلودی").strip()[:300]
+    job_id = video_mod.start_analysis(
+        f"upload:{filename or 'video'}", title_hint=label, mode="manual",
+        local_file=str(dest), cleanup_dir=str(tmpdir),
+    )
+    return {"ok": True, "job_id": job_id, "size": total}
+
+
+@app.get("/api/video/jobs/{job_id}")
+async def video_job(job_id: int, _: None = auth) -> dict:
+    job = video_mod.get_job(job_id)
+    if not job:
+        fail("video_not_found", 404)
+    return {"job": job}
+
+
+@app.get("/api/video/analyses")
+async def video_analyses(limit: int = 30, _: None = auth) -> dict:
+    return {"analyses": video_mod.list_jobs(limit)}
+
+
+@app.post("/api/video/cancel/{job_id}")
+async def video_cancel(job_id: int, _: None = auth) -> dict:
+    return {"ok": video_mod.cancel_analysis(job_id)}
+
+
+@app.delete("/api/video/analyses/{job_id}")
+async def video_delete(job_id: int, _: None = auth) -> dict:
+    video_mod.delete_analysis(job_id)
+    return {"ok": True}
 
 
 # ── misc ────────────────────────────────────────────────────────────────────

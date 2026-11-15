@@ -12,7 +12,7 @@
 | یک حساب Railway (با GitHub وارد شو) | اجرای پنل روی اینترنت |
 | توکن ربات + آیدی عددی کانال | ارسال واقعی به تلگرام/بله/ایتا/روبیکا |
 
-فایل نهایی پروژه: `rozaneh-v1.03.zip` (کنار همین فایل). هم می‌توانی همین را آپلود کنی، هم مخزن گیت را.
+فایل نهایی پروژه: `rozaneh-v1.04.zip` (کنار همین فایل). هم می‌توانی همین را آپلود کنی، هم مخزن گیت را.
 
 ---
 
@@ -23,7 +23,7 @@
 1. وارد <https://github.com/new> شو.
 2. **Repository name**: `rozaneh` — **Private** یا Public (هر دو برای Railway کار می‌کند) — بدون README/LICENSE (چون خودمان داریم) → **Create repository**.
 3. در صفحهٔ بعد روی **uploading an existing file** بزن.
-4. فایل `rozaneh-v1.03.zip` را روی سیستم باز کن (Extract) و **محتوای پوشه** را — نه خود پوشه — داخل صفحه بکش و رها کن. باید این‌ها را ببینی: `app/`, `static/`, `docs/`, `Dockerfile`, `railway.toml`, `start.sh`, `requirements.txt`, `README.md` …
+4. فایل `rozaneh-v1.04.zip` را روی سیستم باز کن (Extract) و **محتوای پوشه** را — نه خود پوشه — داخل صفحه بکش و رها کن. باید این‌ها را ببینی: `app/`, `static/`, `docs/`, `Dockerfile`, `railway.toml`, `start.sh`, `requirements.txt`, `README.md` …
    - اگر پوشهٔ `data/` هم همراهش بود مشکلی نیست؛ دیتابیس دمو با اولین اجرا خودش ساخته/به‌روز می‌شود.
 5. پایین صفحه **Commit changes**.
 
@@ -35,7 +35,7 @@
 cd rozaneh                      # پوشهٔ پروژه
 git init                        # اگر مخزن نیست
 git add -A
-git commit -m "Rozaneh v1.03"
+git commit -m "Rozaneh v1.04"
 git branch -M main
 git remote add origin https://github.com/USER/rozaneh.git     # USER را عوض کن
 git push -u origin main
@@ -47,7 +47,7 @@ git tag v1.02 && git push --tags
 **به‌روزرسانی بعدی:** فایل‌ها را تغییر بده، بعد
 
 ```bash
-git add -A && git commit -m "v1.03: ..." && git push
+git add -A && git commit -m "v1.04: ..." && git push
 ```
 
 ---
@@ -83,7 +83,7 @@ git add -A && git commit -m "v1.03: ..." && git push
 
 ```bash
 curl -s https://YOUR-DOMAIN/healthz
-# {"ok":true,"app":"Rozaneh","version":"1.03"}
+# {"ok":true,"app":"Rozaneh","version":"1.04"}
 ```
 اگر این جواب آمد، سرویس زنده است. (Railway خودش هم `healthcheckPath = /healthz` را چک می‌کند.)
 

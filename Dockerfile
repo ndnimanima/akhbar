@@ -8,8 +8,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# ffmpeg powers the video analyzer (frames + full media specs). It is optional:
+# without it the analyzer falls back to its pure-Python MP4 probe.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && apt-get install -y --no-install-recommends curl ca-certificates ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
