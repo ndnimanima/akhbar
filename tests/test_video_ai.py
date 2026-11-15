@@ -168,11 +168,15 @@ class VideoAISummaryTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(provider=provider), self.assertRaisesRegex(video.VideoError, 'video_ai_bad_response'):
                 video._provider_text(provider, response)
 
-    async def test_youtube_report_labels_missing_media_and_evidence(self):
+    async def test_youtube_reports_sampled_frames_and_does_not_claim_vision(self):
         cfg = {'frames': True, 'summarize': True, 'ai_key_set': True, 'ai_vision': False}
         meta = {'title': 'Video', 'transcript': '', 'description': 'Public description', 'notes': ['No public captions']}
+        frames = [{'at': 1, 'thumb': 'data:image/jpeg;base64,YWJj'}]
         with patch.object(video, 'settings', return_value=cfg), \
+             patch.object(video, 'ffmpeg_available', return_value=True), \
              patch.object(video, '_youtube_meta', new=AsyncMock(return_value=meta)), \
+             patch.object(video, '_youtube_stream', new=AsyncMock(return_value={'url': 'https://cdn.googlevideo.com/test', 'duration': 100})), \
+             patch.object(video, '_extract_frames', new=AsyncMock(return_value=(frames, {'count': 1}))), \
              patch.object(video, '_video_ai_call', new=AsyncMock(return_value='Detailed analysis')), \
              patch.object(video, 'analyse_text', return_value={}):
             report = await video._analyse('https://youtu.be/abcdefghi01')
@@ -180,7 +184,18 @@ class VideoAISummaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report['ai_evidence']['source'], 'description')
         self.assertEqual(report['ai_evidence']['frames_sent'], 0)
         self.assertIn('No public captions', report['notes'])
-        self.assertTrue(any('فایل ویدیو در دسترس نبود' in n for n in report['notes']))
+        self.assertTrue(any('مدل تصویری فعال نیست' in n for n in report['notes']))
+        self.assertNotIn('googlevideo', str(report))
+
+    async def test_youtube_missing_frames_fails_instead_of_title_summary(self):
+        cfg = {'frames': True, 'summarize': True, 'ai_key_set': False, 'ai_vision': False}
+        with patch.object(video, 'settings', return_value=cfg), \
+             patch.object(video, 'ffmpeg_available', return_value=True), \
+             patch.object(video, '_youtube_meta', new=AsyncMock(return_value={'title': 'Video'})), \
+             patch.object(video, '_youtube_stream', new=AsyncMock(return_value={'url':'https://cdn.googlevideo.com/video','duration': 10})), \
+             patch.object(video, '_extract_frames', new=AsyncMock(return_value=([], {}))), \
+             self.assertRaisesRegex(video.VideoError, 'video_frames_unavailable'):
+            await video._analyse('https://youtu.be/abcdefghi01')
 
     async def test_no_deadline_in_client(self):
         client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: httpx.Response(200, json={'choices': [{'message': {'content': 'OK'}}]})))

@@ -92,8 +92,9 @@ function reportBody(r) {
         "</div>" +
       "</div>" +
       '<div class="vmetrics">' + meta + "</div>" +
+      (r.frames && r.frames.length && !(r.ai_evidence && r.ai_evidence.frames_sent) ? '<div class="vevidence">' + ico("info") + '<span>' + h(t("video.frames_not_sent")) + '</span></div>' : '') +
       (r.ai_evidence ? '<div class="vevidence">' + ico("info") + '<span>' +
-        h(t("video.evidence_" + r.ai_evidence.source)) + ' · ' + h(t("video.evidence_parts")) + ': ' + num(r.ai_evidence.segments) +
+        h(t("video.evidence_" + (r.ai_evidence.source === "frames" ? "frames_source" : r.ai_evidence.source))) + ' · ' + h(t("video.evidence_parts")) + ': ' + num(r.ai_evidence.segments) +
         ' · ' + h(t("video.evidence_frames")) + ': ' + num(r.ai_evidence.frames_sent) + '</span></div>' : '') +
       (r.summary ? '<section class="vblock"><h4>' + ico("sparkles") + h(t("video.summary")) + "</h4><p class=\"vsummary\">" + h(r.summary) + "</p>" +
         '<div class="inline"><button class="btn ghost sm" data-act="video.copy">' + ico("code") + "<span>" + h(t("video.copy_caption")) + "</span></button></div>" +
@@ -114,28 +115,20 @@ function videoJobsHtml() {
   const jobs = (state.video.jobs || []).map((j) => {
     const rep = j.report || {};
     const open = state.video.activeJob === j.id;
-    return (
-      '<article class="vjob' + (open ? " open" : "") + '">' +
-        '<div class="vjob-head" data-act="video.toggle" data-id="' + j.id + '">' +
-          '<div class="vjob-thumb">' + (rep.thumbnail ? '<img loading="lazy" src="' + h(rep.thumbnail) + '" alt="">' : ico("video")) + "</div>" +
-          '<div class="vjob-txt"><b>' + h(j.title || rep.title || j.url || "—") + "</b>" +
-            '<div class="inline tiny mute" style="gap:6px">' + videoStatusChip(j) +
-              '<span class="chip">' + h(t("video.mode_" + (j.mode === "auto" ? "auto" : j.mode === "api" ? "api" : "manual"))) + "</span>" +
-              (rep.duration ? "<span>" + fmtDur(rep.duration) + "</span>" : "") +
-              "<span>" + h(fmtDate(j.created_at)) + "</span>" +
-            "</div>" +
-          "</div>" +
-          '<div class="vjob-acts">' +
-            (j.status === "running" ? '<button class="btn danger xs icon" data-act="video.cancel" data-id="' + j.id + '" title="' + h(t("video.cancel")) + '">' + ico("x") + "</button>" : "") +
-            '<button class="btn ghost xs icon" data-act="video.delete" data-id="' + j.id + '" title="' + h(t("video.delete")) + '">' + ico("trash") + "</button>" +
-            '<span class="vchev">' + ICO_CHEV + "</span>" +
-          "</div>" +
-        "</div>" +
-        (open ? '<div class="vjob-body">' + (j.status === "failed" ? '<div class="banner bad">' + ico("alert") + "<span>" + h(errMsg({ message: j.error || "unknown" })) + "</span></div>" : reportBody(rep)) + "</div>" : "") +
-      "</article>"
-    );
-  }).join("");
-  return jobs || emptyBox("video", t("video.empty"), t("video.no_timeout_note"));
+    return '<article class="vjob' + (open ? ' open' : '') + '">' +
+      '<div class="vjob-head">' +
+      '<button type="button" class="vjob-open" data-act="video.toggle" data-id="' + j.id + '" aria-expanded="' + (open ? 'true' : 'false') + '" aria-label="' + h(t(open ? 'video.close_report' : 'video.open_report')) + '">' +
+      '<span class="vjob-thumb">' + (rep.thumbnail ? '<img loading="lazy" src="' + h(rep.thumbnail) + '" alt="">' : ico('video')) + '</span>' +
+      '<span class="vjob-txt"><b>' + h(j.title || rep.title || j.url || '—') + '</b><span class="vjob-meta">' +
+      videoStatusChip(j) + '<span class="chip">' + h(t('video.mode_' + (j.mode === 'auto' ? 'auto' : j.mode === 'api' ? 'api' : 'manual'))) + '</span>' +
+      (rep.duration ? '<span>' + fmtDur(rep.duration) + '</span>' : '') + '<span>' + h(fmtDate(j.created_at)) + '</span></span></span>' +
+      '<span class="vchev">' + ICO_CHEV + '</span></button>' +
+      '<div class="vjob-acts">' +
+      (j.status === 'running' ? '<button class="btn danger xs icon" data-act="video.cancel" data-id="' + j.id + '" title="' + h(t('video.cancel')) + '">' + ico('x') + '</button>' : '') +
+      '<button class="btn ghost xs icon" data-act="video.delete" data-id="' + j.id + '" title="' + h(t('video.delete')) + '">' + ico('trash') + '</button></div></div>' +
+      (open ? '<div class="vjob-body">' + (j.status === 'failed' ? '<div class="banner bad">' + ico('alert') + '<span>' + h(errMsg({ message: j.error || 'unknown' })) + '</span></div>' : reportBody(rep)) + '</div>' : '') + '</article>';
+  }).join('');
+  return jobs || emptyBox('video', t('video.empty'), t('video.no_timeout_note'));
 }
 
 function videoProgressHtml() {
@@ -215,8 +208,8 @@ async function renderVideo(view) {
     '<div class="vupload">' + ico("arrowUp") +
       '<div><b>' + h(t("video.upload")) + "</b><small>" + h(t("video.upload_hint")) + "</small></div>" +
       '<input type="file" id="videoFile" accept="video/*" hidden>' +
-      '<button type="button" class="btn ghost sm" data-act="video.pick">' + h(t("video.upload")) + "</button>" +
-    "</div>";
+      '<button type="button" class="btn ghost sm" data-act="video.pick"' + (uploadRequest ? ' disabled' : '') + '>' + h(t("video.upload")) + "</button>" +
+    "</div>" + '<div id="videoUploadProgress">' + uploadProgressHtml() + '</div>';
 
   view.innerHTML =
     pageHead(t("video.title"), t("video.subtitle"),
@@ -295,22 +288,63 @@ function pollVideo() {
   }, 2500);
 }
 
+let uploadRequest = null;
+let uploadState = null;
+
+function uploadProgressHtml() {
+  if (!uploadState) return "";
+  const pct = uploadState.total ? Math.min(100, Math.floor(uploadState.loaded * 100 / uploadState.total)) : 0;
+  const label = uploadState.loaded >= uploadState.total && uploadState.total ? t("video.upload_processing") : t("video.uploading");
+  return '<div class="vupload-progress"><div class="vupload-progress-head"><b>' + h(label) + '</b><span dir="ltr">' + num(pct) + '% · ' + h(fmtBytes(uploadState.loaded)) + ' / ' + h(fmtBytes(uploadState.total)) + '</span>' +
+    '<button type="button" class="btn ghost xs" data-act="video.uploadCancel">' + h(t("video.cancel")) + '</button></div>' +
+    '<progress max="100" value="' + pct + '" aria-label="' + h(t("video.uploading")) + '"></progress></div>';
+}
+function updateUploadProgress() {
+  const box = $("#videoUploadProgress");
+  if (box) box.innerHTML = uploadProgressHtml();
+  const pick = document.querySelector('[data-act="video.pick"]');
+  if (pick) pick.disabled = !!uploadRequest;
+}
+
 async function uploadVideo() {
   const input = $("#videoFile");
   const file = input && input.files && input.files[0];
-  if (!file) return;
-  if (file.size > 2 * 1024 * 1024 * 1024) { toast(t("err.file_too_large"), "err"); return; }
-  toast(t("video.analysing"), "info");
+  if (!file || uploadRequest) return;
+  if (file.size > 2 * 1024 * 1024 * 1024) { toast(t("err.file_too_large"), "err"); input.value = ""; return; }
+  uploadState = { loaded: 0, total: file.size };
+  const xhr = new XMLHttpRequest();
+  uploadRequest = xhr;
+  updateUploadProgress();
   try {
-    const res = await fetch("/api/video/upload?filename=" + encodeURIComponent(file.name), {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/octet-stream" }, body: file,
+    const data = await new Promise((resolve, reject) => {
+      xhr.open("POST", "/api/video/upload?filename=" + encodeURIComponent(file.name));
+      xhr.withCredentials = true;
+      xhr.setRequestHeader("Content-Type", "application/octet-stream");
+      xhr.upload.onprogress = (event) => {
+        uploadState = { loaded: event.loaded, total: event.lengthComputable ? event.total : file.size };
+        updateUploadProgress();
+      };
+      xhr.onload = () => {
+        let data = null;
+        try { data = JSON.parse(xhr.responseText); } catch (_) {}
+        if (xhr.status >= 200 && xhr.status < 300 && data) resolve(data);
+        else reject(new Error((data && data.detail) || "unknown"));
+      };
+      xhr.onerror = () => reject(new Error("network_error"));
+      xhr.onabort = () => reject(new Error("upload_cancelled"));
+      // The browser streams the File; JS does not read it into memory.
+      xhr.send(file);
     });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) throw new Error((data && data.detail) || "unknown");
     state.video.activeJob = data.job_id;
-    await reload(); pollVideo();
-  } catch (e) { toast(errMsg(e), "err"); }
+    uploadRequest = null; uploadState = null;
+    if (state.route === "video") { await reload(); pollVideo(); }
+    toast(t("video.analysing"), "info");
+  } catch (e) {
+    uploadRequest = null; uploadState = null;
+    updateUploadProgress();
+    if (input) input.value = "";
+    toast(errMsg(e), e.message === "upload_cancelled" ? "info" : "err");
+  }
 }
 
   /* wiring: page, actions and the form all register through the shared API */
@@ -334,7 +368,8 @@ async function uploadVideo() {
     "video.toggle": (el) => {
       const id = Number(el.dataset.id);
       state.video.activeJob = state.video.activeJob === id ? null : id;
-      reload();
+      const history = $("#videoHistoryBody");
+      if (history) { const html = videoJobsHtml(); history.innerHTML = html; history.dataset.sig = html; }
     },
     "video.refresh": async () => { await loadVideo(); await reload(); },
     "video.aiProvider": (el) => {
@@ -368,7 +403,8 @@ async function uploadVideo() {
         await loadVideo(); await reload();
       });
     },
-    "video.pick": () => { const f = $("#videoFile"); if (f) f.click(); },
+    "video.pick": () => { const f = $("#videoFile"); if (f && !uploadRequest) f.click(); },
+    "video.uploadCancel": () => { if (uploadRequest) uploadRequest.abort(); },
     "video.copy": async () => {
       const pre = $("#videoCaption");
       const txt = pre ? pre.textContent : "";
