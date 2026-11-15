@@ -239,7 +239,10 @@ async def run_job(
             item["_topic"] = best_topic
             if selected_topics and not (matched_ids & selected_topics):
                 report["skipped"] += 1
-                filtered_out.append(item)
+                # Only the first MAX_FILTERED_STORED entries are persisted;
+                # retain none for dry runs, which never persist filtered items.
+                if not dry_run and len(filtered_out) < MAX_FILTERED_STORED:
+                    filtered_out.append(item)
                 continue
             eligible.append(item)
 

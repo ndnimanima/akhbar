@@ -1280,8 +1280,8 @@ async def video_job(job_id: int, _: None = auth) -> dict:
 
 
 @app.get("/api/video/analyses")
-async def video_analyses(limit: int = 30, _: None = auth) -> dict:
-    return {"analyses": video_mod.list_jobs(limit)}
+async def video_analyses(limit: int = 30, brief: bool = False, _: None = auth) -> dict:
+    return {"analyses": video_mod.list_jobs(limit, brief=brief)}
 
 
 @app.post("/api/video/cancel/{job_id}")

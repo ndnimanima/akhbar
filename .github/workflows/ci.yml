@@ -23,10 +23,18 @@ jobs:
       - name: Byte-compile sources
         run: python -m compileall -q app main.py
 
+      - name: Install ffmpeg for video regression tests
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Video memory and frame regression tests
+        run: python -m unittest discover -s tests -v
+
       - name: Frontend syntax + assets
         run: |
           node --check static/assets/app.js
           node --check static/assets/i18n.js
+          node --check static/assets/video.js
+          node tests/test_video_poll.cjs
           for f in static/index.html static/login.html static/assets/style.css static/assets/logo.svg; do
             test -s "$f" || { echo "missing $f"; exit 1; }
           done

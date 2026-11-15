@@ -115,10 +115,17 @@ async def og_image(link: str) -> str:
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(7.0), follow_redirects=True, headers=BROWSER_HEADERS
         ) as client:
-            response = await client.get(link)
-            if response.status_code >= 400:
-                return ""
-            text = response.text[:500_000]
+            async with client.stream("GET", link) as response:
+                if response.status_code >= 400:
+                    return ""
+                parts: list[str] = []
+                remaining = 500_000
+                async for chunk in response.aiter_text(chunk_size=16384):
+                    parts.append(chunk[:remaining])
+                    remaining -= min(len(chunk), remaining)
+                    if not remaining:
+                        break
+                text = "".join(parts)
     except Exception:  # noqa: BLE001 — enrichment must never break a run
         return ""
     url = _meta_images(text)

@@ -212,14 +212,31 @@ async function loadVideo() {
   state.video.jobs = jobs.analyses || [];
 }
 
+async function pollVideoData() {
+  const [st, jobs] = await Promise.all([api("/api/video/status"), api("/api/video/analyses?limit=30&brief=true")]);
+  const previous = new Map((state.video.jobs || []).map((j) => [j.id, j]));
+  const rows = await Promise.all((jobs.analyses || []).map(async (j) => {
+    const old = previous.get(j.id);
+    if (j.status === "done" && (!old || old.status !== "done" || !old.report)) {
+      return (await api("/api/video/jobs/" + j.id)).job;
+    }
+    return { ...j, report: old && old.status === j.status ? old.report : {} };
+  }));
+  state.video.status = st;
+  state.video.settings = st.settings || {};
+  state.video.jobs = rows;
+}
+
 function pollVideo() {
   if (state.video.polling) return;
-  let misses = 0;
+  let misses = 0, busy = false;
   state.video.polling = setInterval(async () => {
     if (state.route !== "video") { clearInterval(state.video.polling); state.video.polling = null; return; }
+    if (busy) return;
+    busy = true;
     try {
       const before = (state.video.jobs || []).filter((j) => j.status === "running").length;
-      await loadVideo();
+      await pollVideoData();
       // Only touch the DOM when the markup really changed — otherwise a
       // click could land on a node that is being replaced mid-interaction.
       const history = $("#videoHistoryBody");
@@ -243,6 +260,8 @@ function pollVideo() {
     } catch (e) {
       misses += 1;
       if (misses > 5) { clearInterval(state.video.polling); state.video.polling = null; }
+    } finally {
+      busy = false;
     }
   }, 2500);
 }
