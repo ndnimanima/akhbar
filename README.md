@@ -1,40 +1,72 @@
 <div align="center">
 
-<img src="docs/images/readme-hero.png" alt="نمای مفهومی روزنه؛ داشبورد هوشمند خبر" width="100%">
+<img src="docs/images/readme-hero.png" alt="تصویر مفهومی روزنه: داشبورد خبر و جریان داده" width="100%">
 
 # روزنه · Rozaneh
 
-**از سرخط خبر تا کانال، خودکار.**<br>
-پنل متن‌باز مدیریت خبر، زمان‌بندی انتشار و تحلیل ویدیو
+### از سرخط خبر تا کانال، خودکار.
 
-[شروع سریع](#شروع-سریع) · [امکانات](#امکانات) · [تصاویر پنل](#اسکرینشاتها) · [سازندگان](#سازندگان) · [English](#english-summary)
+**یک اتاق خبر کوچک، برای ایده‌های بزرگ.**<br>منابع خودت را انتخاب کن؛ روزنه خبرها را می‌خواند، مرتب می‌کند و به مخاطبانت می‌رساند.
+
+`Python` &nbsp; · &nbsp; `FastAPI` &nbsp; · &nbsp; `SQLite` &nbsp; · &nbsp; `Docker` &nbsp; · &nbsp; `MIT`
+
+[شروع سریع](#شروع-سریع) &nbsp; ✦ &nbsp; [جریان کار](#جریان-کار) &nbsp; ✦ &nbsp; [نگاهی به پنل](#gallery) &nbsp; ✦ &nbsp; [سازندگان](#سازندگان) &nbsp; ✦ &nbsp; [English](#english-summary)
 
 </div>
 
-روزنه یک پنل کامل و آمادهٔ دیپلوی است که منابع خبری (RSS / Atom / صفحهٔ خبری) را در بازه‌های زمانی مشخص می‌خواند، هر خبر را بر اساس موضوع دسته‌بندی می‌کند، به فارسی روان ترجمه می‌کند و **هر خبر را به‌صورت یک پیام مستقل همراه با عکس خودش** در کانال‌های تلگرام، بله، ایتا، روبیکا یا یک وب‌هوک منتشر می‌کند.
+---
 
-نسخهٔ فعلی: **v1.04** — هر انتشار، یک‌صدم به نسخه اضافه می‌کند (`v1.02`, `v1.04`, …).
+## روزنه در یک نگاه
+
+روزنه یک پنل متن‌باز برای **جمع‌آوری، دسته‌بندی و انتشار خبر** است. منابع RSS، Atom یا صفحات خبری را در بازه‌های مشخص می‌خواند؛ سپس بر اساس قواعد دلخواهت خبرها را فیلتر، در صورت نیاز ترجمه و به تلگرام، بله، ایتا، روبیکا یا وب‌هوک ارسال می‌کند. در کنار آن، تحلیلگر ویدیو و آرشیو و گزارش‌ها را هم در اختیار داری.
+
+📡 **منابع خودت** · 🎯 **فیلتر موضوعی** · 🌐 **ترجمهٔ اختیاری** · ⏱️ **زمان‌بندی** · 🎬 **تحلیل ویدیو**
+
+> روزنه برای اجرای خودکار به سرور روشن و فضای ذخیره‌سازی دائمی نیاز دارد. قابلیت‌های هوش مصنوعی نیز به مدل، کلید و دسترسی سرویس انتخابی وابسته‌اند.
 
 ---
 
-## فهرست
+## جریان کار
 
-- [امکانات](#امکانات)
-- [اسکرین‌شات‌ها](#اسکرینشاتها)
-- [شروع سریع](#شروع-سریع)
-- [متغیرهای محیطی](#متغیرهای-محیطی)
-- [جریان کار](#جریان-کار)
-- [کانال‌ها و پیام‌رسان‌ها](#کانالها-و-پیامرسانها)
-- [ترجمه](#ترجمه)
-- [ساختار پروژه](#ساختار-پروژه)
-- [API](#api)
-- [امنیت](#امنیت)
-- [نسخه‌گذاری](#نسخهگذاری)
-- [English summary](#english-summary)
+<div align="center">
+<img src="docs/images/workflow.gif" alt="انیمیشن جریان کار روزنه: جمع‌آوری منابع، فیلتر زمانی، دسته‌بندی موضوعی، ترجمهٔ اختیاری و انتشار" width="100%">
+</div>
+
+1. **دریافت** — خبرها از منابع انتخابی خوانده می‌شوند.
+2. **انتخاب** — بازهٔ زمانی و موضوعات بررسی می‌شوند؛ فیلتر موضوعی قبل از سقف خبر اعمال می‌شود.
+3. **آماده‌سازی** — در صورت فعال‌بودن، ترجمه انجام می‌شود و تصویر در دسترس از خود خبر انتخاب می‌شود.
+4. **انتشار و پیگیری** — هر خبر به‌صورت جداگانه به مقصدهای انتخاب‌شده ارسال و وضعیت آن در آرشیو و گزارش‌ها ثبت می‌شود. گزینهٔ «فقط خبرهای تازه» از ارسال دوباره جلوگیری می‌کند.
+
+[نمای بدون حرکت](docs/images/workflow-still.png) · [قواعد پیام‌رسان‌ها](#messengers)
+
+---
+
+<a id="gallery"></a>
+
+## اسکرین‌شات‌ها
+
+<div align="center">
+
+**یک نگاه به فضای روزنه**<br>این تصاویر از پنل واقعی و با داده‌های ساختگی گرفته شده‌اند؛ زمان‌بند در محیط نمونه خاموش است.
+
+<img src="docs/shots/readme-dashboard.png" alt="نمونهٔ داشبورد روزنه با آمار، نمودار و خبرها" width="100%">
+
+| منابع خبری | قواعد انتشار |
+| :---: | :---: |
+| ![نمونهٔ صفحهٔ منابع خبری](docs/shots/readme-feeds.png) | ![نمونهٔ صفحهٔ قواعد انتشار](docs/shots/readme-jobs.png) |
+
+[دیدن بقیهٔ تصاویر](docs/shots/)
+
+</div>
 
 ---
 
 ## امکانات
+
+از تنظیم منابع و انتشار زمان‌بندی‌شده تا تحلیل ویدیو، گزارش‌ها و شخصی‌سازی پنل؛ جزئیات قابلیت‌ها را اینجا باز کن:
+
+<details>
+<summary><strong>نمایش قابلیت‌ها و محدودیت‌های مهم</strong></summary>
 
 **منابع خبری**
 - افزودن لینک RSS/Atom، صفحهٔ خبری HTML، افزودن گروهی (هر خط یک لینک) و تست لینک **قبل از ذخیره**.
@@ -84,47 +116,21 @@
 - بخش **مدیریت**: تغییر ظاهر و ترتیب لینک‌ها، تم/زبان/منطقهٔ زمانی، خروجی/بازیابی JSON، پاک‌سازی آرشیو، مدیریت نشست‌ها و رمز عبور.
 - بخش **سازندگان** و **ارتباط با ما** (پیام‌ها در گزارش‌ها ثبت و در صورت تنظیم، به وب‌هوک شما ارسال می‌شوند).
 
+</details>
+
 ---
 
 ## سازندگان
 
-<table>
-<tr>
-<td align="center"><a href="https://github.com/ndnima"><img src="https://avatars.githubusercontent.com/u/342028048?v=4" width="88" alt=""><br><b>نیما دلیر</b></a><br>توسعه‌دهنده و تولیدکننده محتوای فناوری</td>
-<td align="center"><a href="https://github.com/alireza-bokharaei"><img src="https://avatars.githubusercontent.com/u/347124742?v=4" width="88" alt=""><br><b>علیرضا بخارائی</b></a><br>توسعه‌دهنده نرم‌افزار و زیرساخت</td>
-<td align="center"><a href="https://github.com/ostovar04"><img src="https://avatars.githubusercontent.com/u/28998015?v=4" width="88" alt=""><br><b>متین</b></a><br>توسعه‌دهنده پایتون و وب</td>
-</tr>
-</table>
+<div align="center">
 
----
+**سه نگاه، یک ایده: روزنه**<br>آشنایی با تیمی که پشت این پروژه ایستاده است.
 
-## اسکرین‌شات‌ها
+<a href="https://github.com/ndnima"><img src="docs/images/creator-ndnima.gif" alt="نیما دلیر؛ توسعه‌دهنده و تولیدکننده محتوای فناوری" width="30%"></a> <a href="https://github.com/alireza-bokharaei"><img src="docs/images/creator-alireza-bokharaei.gif" alt="علیرضا بخارائی؛ توسعه‌دهنده نرم‌افزار و زیرساخت" width="30%"></a> <a href="https://github.com/ostovar04"><img src="docs/images/creator-ostovar04.gif" alt="متین؛ توسعه‌دهنده پایتون و وب" width="30%"></a>
 
-| داشبورد — تم طوسی | داشبورد — تم کهربایی |
-| --- | --- |
-| ![](docs/shots/01-dashboard-fa-slate.png) | ![](docs/shots/07-dashboard-fa-amber.png) |
+[نیما دلیر](https://github.com/ndnima) &nbsp; · &nbsp; [علیرضا بخارائی](https://github.com/alireza-bokharaei) &nbsp; · &nbsp; [متین](https://github.com/ostovar04)
 
-| منابع خبری | قواعد انتشار |
-| --- | --- |
-| ![](docs/shots/03-feeds-fa-slate.png) | ![](docs/shots/03-jobs-fa-slate.png) |
-
-| مدیریت — لینک‌ها | رابط انگلیسی |
-| --- | --- |
-| ![](docs/shots/04-admin-links.png) | ![](docs/shots/09-dashboard-en-amber.png) |
-
-| گزارش اجرای آزمایشی | منوی موبایل |
-| --- | --- |
-| ![](docs/shots/06-modal-dryrun.png) | ![](docs/shots/12-mobile-menu.png) |
-
-| صفحهٔ ورود (اصلاح‌شده در ۱٫۰۲) | قوانین پیام‌رسان در مودال کانال |
-| --- | --- |
-| ![](docs/shots/00-login-fa-slate.png) | ![](docs/shots/14-channel-rules-telegram.png) |
-
-| کارت قواعد (بازطراحی ۱٫۰۳) | گزارش اجرا با تشخیص دلیل ارسال‌نشدن |
-| --- | --- |
-| ![](docs/shots/03-jobs-fa-slate.png) | ![](docs/shots/15-report-diagnosis.png) |
-
-تصاویر بیشتر در پوشهٔ [`docs/shots`](docs/shots).
+</div>
 
 ---
 
@@ -201,21 +207,7 @@ uvicorn app.main:app --reload --port 8080
 
 ---
 
-## جریان کار
-
-```text
-┌────────────┐   ┌──────────────┐   ┌───────────────┐   ┌──────────────┐   ┌─────────────┐
-│  منابع RSS │ → │  بازهٔ زمانی  │ → │ فیلتر موضوعی  │ → │ ترجمه EN→FA  │ → │  کانال‌ها    │
-│ RSS/Atom/  │   │  (۶ تا ۲۴ س) │   │ وزن کلیدواژه  │   │ DeepSeek +   │   │ ۵ پیام‌رسان  │
-│   HTML     │   │              │   │ قبل از سقف    │   │ fallback     │   │ هر خبر ۱ پیام│
-└────────────┘   └──────────────┘   └───────────────┘   └──────────────┘   └─────────────┘
-                                                                                   │
-                                                        آرشیو + گزارش‌ها ←──────────┘
-```
-
-فیلتر موضوعی **قبل** از اعمال سقف خبر انجام می‌شود تا سهمیهٔ هر اجرا با خبرهای بی‌ربط پر نشود. هر خبر پیش از ارسال در آرشیو ثبت می‌شود؛ بدون تکرار (`only_unseen`) و با استخراج عکس از خود خبر.
-
----
+<a id="messengers"></a>
 
 ## کانال‌ها و پیام‌رسان‌ها
 
@@ -272,7 +264,7 @@ rozaneh/
 ├── static/
 │   ├── index.html     # پوستهٔ پنل
 │   ├── login.html     # صفحهٔ ورود
-│   └── assets/        # style.css (دو تم) · i18n.js (فا/EN) · app.js · video.js · logo.svg
+│   └── assets/        # style.css (چهار تم) · i18n.js (فا/EN) · app.js · video.js · logo.svg
 ├── docs/shots/        # اسکرین‌شات‌ها
 ├── Dockerfile · railway.toml · start.sh · requirements.txt
 └── .github/workflows/ci.yml
@@ -370,7 +362,7 @@ python docs/verify_panel.py                # اسکرین‌شات همهٔ صف
 
 Highlights:
 
-- Bilingual panel (Persian RTL / English LTR) with two themes — *Slate* (dark) and *Amber & White*.
+- Bilingual panel (Persian RTL / English LTR) with four themes — *Slate*, *Amber & White*, *Aurora* and *Ocean*.
 - Per-link appearance control (icon, colour, URL visibility, order), bulk add and link testing.
 - Topic engine with weighted keyword matching and 10 bilingual presets.
 - Publishing rules with multiple daily hours or an interval, a news window, per-run cap, source/topic/channel selection, dry runs and full run reports.
