@@ -47,6 +47,34 @@ class VideoAIAPITests(unittest.TestCase):
         self.assertFalse(video.settings()['ai_key_set'])
         self.assertTrue(video.settings()['smart'])
 
+    def test_switch_provider_requires_new_key_and_preserves_old_settings(self):
+        old = {'provider': 'openai_compatible', 'base_url': 'https://api.example.test/v1', 'model': 'original', 'api_key': 'old-secret'}
+        self.assertEqual(self.client.put('/api/video/ai-settings', json=old).status_code, 200)
+        new = {'provider': 'gemini', 'base_url': 'https://generativelanguage.googleapis.com/v1beta', 'model': 'gemini-2.5-flash'}
+        rejected = self.client.put('/api/video/ai-settings', json=new)
+        self.assertEqual(rejected.json()['detail'], 'video_ai_new_key_required')
+        self.assertEqual(video.settings()['ai_provider'], 'openai_compatible')
+        self.assertEqual(db.get_setting('video_ai_api_key'), 'old-secret')
+        rejected = self.client.put('/api/video/ai-settings', json={**old, 'base_url': 'https://other.example.test/v1', 'api_key': ''})
+        self.assertEqual(rejected.json()['detail'], 'video_ai_new_key_required')
+        self.assertEqual(self.client.put('/api/video/ai-settings', json={**new, 'api_key': 'new-secret'}).status_code, 200)
+        self.assertEqual(video.settings()['ai_provider'], 'gemini')
+        self.assertEqual(db.get_setting('video_ai_api_key'), 'new-secret')
+        invalid = self.client.put('/api/video/ai-settings', json={**new, 'provider': 'unknown'})
+        self.assertEqual(invalid.json()['detail'], 'video_ai_provider_invalid')
+        self.assertEqual(video.settings()['ai_provider'], 'gemini')
+
+    def test_backup_import_cannot_redirect_existing_secret(self):
+        payload = {'provider': 'gemini', 'base_url': 'https://generativelanguage.googleapis.com/v1beta', 'model': 'test', 'api_key': 'my-secret'}
+        self.assertEqual(self.client.put('/api/video/ai-settings', json=payload).status_code, 200)
+        backup = {'settings': {'video_ai_base_url': 'https://attacker.test/v1', 'video_ai_provider': 'anthropic', 'video_ai_model': 'new-model', 'video_ai_api_key': 'bad'}}
+        r = self.client.post('/api/admin/import', json={'confirm': True, 'payload': backup})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(video.settings()['ai_base_url'], payload['base_url'])
+        self.assertEqual(video.settings()['ai_provider'], 'gemini')
+        self.assertEqual(db.get_setting('video_ai_api_key'), 'my-secret')
+        self.assertEqual(video.settings()['ai_model'], 'new-model')
+
     def test_analyze_is_manual_and_does_not_enable_smart(self):
         self.assertFalse(video.settings()['smart'])
         with patch.object(video, 'start_analysis', return_value=42) as start:
@@ -89,13 +117,56 @@ class VideoAISummaryTests(unittest.IsolatedAsyncioTestCase):
             seen.append(request)
             return httpx.Response(401, json={'error': 'SECRET-KEY'})
         client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
-        cfg = {'ai_base_url': 'https://api.example.test/v1', 'ai_model': 'model'}
-        with patch.object(video.db, 'get_setting', return_value='SECRET-KEY'), patch.object(video, 'settings', return_value=cfg), patch.object(video.httpx, 'AsyncClient', return_value=client):
+        cfg = {'video_ai_api_key': 'SECRET-KEY', 'video_ai_base_url': 'https://api.example.test/v1', 'video_ai_model': 'model'}
+        with patch.object(video.db, 'all_settings', return_value=cfg), patch.object(video.httpx, 'AsyncClient', return_value=client):
             with self.assertRaisesRegex(video.VideoError, 'video_ai_http_401') as err:
                 await video.test_ai_connection()
         self.assertNotIn('SECRET-KEY', str(err.exception))
         self.assertEqual(seen[0].headers['Authorization'], 'Bearer SECRET-KEY')
         self.assertEqual(str(seen[0].url), 'https://api.example.test/v1/chat/completions')
+
+    async def test_native_providers_text_and_image_requests(self):
+        messages = [{'role': 'system', 'content': 'be accurate'}, {'role': 'user', 'content': [
+            {'type': 'text', 'text': 'what is this?'},
+            {'type': 'image_url', 'image_url': {'url': 'data:image/jpeg;base64,YWJj'}},
+        ]}]
+        for provider, base, model, response_data in [
+            ('openai_compatible', 'https://openrouter.ai/api/v1', 'openai/model', {'choices': [{'message': {'content': 'openai result'}}]}),
+            ('gemini', 'https://generativelanguage.googleapis.com/v1beta', 'gemini-test', {'candidates': [{'content': {'parts': [{'text': 'gemini result'}]}}]}),
+            ('anthropic', 'https://api.anthropic.com/v1', 'claude-test', {'content': [{'type': 'text', 'text': 'anthropic result'}]}),
+        ]:
+            with self.subTest(provider=provider):
+                captured = []
+                def respond(request):
+                    captured.append(request)
+                    return httpx.Response(200, json=response_data)
+                client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+                cfg = {'video_ai_api_key': 'secret-key', 'video_ai_provider': provider, 'video_ai_base_url': base, 'video_ai_model': model}
+                with patch.object(video.db, 'all_settings', return_value=cfg), patch.object(video.httpx, 'AsyncClient', return_value=client):
+                    result = await video._video_ai_call(messages)
+                self.assertEqual(result, provider.split('_')[0] + ' result')
+                req, body = captured[0], json.loads(captured[0].content)
+                if provider == 'openai_compatible':
+                    self.assertEqual(str(req.url), base + '/chat/completions')
+                    self.assertEqual(req.headers['authorization'], 'Bearer secret-key')
+                    self.assertEqual(body['messages'], messages)
+                elif provider == 'gemini':
+                    self.assertEqual(str(req.url), base + '/models/gemini-test:generateContent')
+                    self.assertEqual(req.headers['x-goog-api-key'], 'secret-key')
+                    self.assertNotIn('secret-key', str(req.url))
+                    self.assertEqual(body['system_instruction']['parts'][0]['text'], 'be accurate')
+                    self.assertEqual(body['contents'][0]['parts'][1]['inline_data']['data'], 'YWJj')
+                else:
+                    self.assertEqual(str(req.url), base + '/messages')
+                    self.assertEqual(req.headers['x-api-key'], 'secret-key')
+                    self.assertEqual(req.headers['anthropic-version'], '2023-06-01')
+                    self.assertEqual(body['system'], 'be accurate')
+                    self.assertEqual(body['messages'][0]['content'][1]['source']['data'], 'YWJj')
+
+    def test_bad_or_empty_provider_responses(self):
+        for provider, response in [('gemini', {'candidates': []}), ('anthropic', {'content': []}), ('openai_compatible', {'choices': [{'message': {'content': None}}]})]:
+            with self.subTest(provider=provider), self.assertRaisesRegex(video.VideoError, 'video_ai_bad_response'):
+                video._provider_text(provider, response)
 
     async def test_youtube_report_labels_missing_media_and_evidence(self):
         cfg = {'frames': True, 'summarize': True, 'ai_key_set': True, 'ai_vision': False}
@@ -113,8 +184,8 @@ class VideoAISummaryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_deadline_in_client(self):
         client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: httpx.Response(200, json={'choices': [{'message': {'content': 'OK'}}]})))
-        cfg = {'ai_base_url': 'https://api.example.test/v1', 'ai_model': 'model'}
-        with patch.object(video.db, 'get_setting', return_value='SECRET-KEY'), patch.object(video, 'settings', return_value=cfg), patch.object(video.httpx, 'AsyncClient', return_value=client) as factory:
+        cfg = {'video_ai_api_key': 'SECRET-KEY', 'video_ai_base_url': 'https://api.example.test/v1', 'video_ai_model': 'model'}
+        with patch.object(video.db, 'all_settings', return_value=cfg), patch.object(video.httpx, 'AsyncClient', return_value=client) as factory:
             await video.test_ai_connection()
         self.assertEqual(factory.call_args.kwargs['timeout'], httpx.Timeout(None))
         self.assertFalse(factory.call_args.kwargs['follow_redirects'])

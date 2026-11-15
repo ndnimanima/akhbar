@@ -37,7 +37,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -89,6 +89,7 @@ def settings() -> dict:
         "summarize": (db.get_setting("video_summarize") or "1") == "1",
         "frames": (db.get_setting("video_frames") or "1") == "1",
         "last_smart_run": db.get_setting("video_smart_last_run") or "",
+        "ai_provider": db.get_setting("video_ai_provider") or "openai_compatible",
         "ai_base_url": db.get_setting("video_ai_base_url") or "https://api.openai.com/v1",
         "ai_model": db.get_setting("video_ai_model") or "gpt-4o-mini",
         "ai_key_set": bool(db.get_setting("video_ai_api_key")),
@@ -113,7 +114,12 @@ def set_settings(patch: dict) -> dict:
 
 
 def set_ai_settings(base_url: str, model: str, api_key: str = "", *,
-                    clear_key: bool = False, vision: bool = False) -> dict:
+                    clear_key: bool = False, vision: bool = False,
+                    provider: str | None = None) -> dict:
+    current = settings()
+    provider = provider or current["ai_provider"]
+    if provider not in {"openai_compatible", "gemini", "anthropic"}:
+        raise VideoError("video_ai_provider_invalid")
     base_url = (base_url or "").strip().rstrip("/")
     parsed = urlparse(base_url)
     if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
@@ -125,13 +131,19 @@ def set_ai_settings(base_url: str, model: str, api_key: str = "", *,
     api_key = (api_key or "").strip()
     if len(api_key) > 4096 or any(c in api_key for c in "\r\n"):
         raise VideoError("video_ai_key_invalid")
-    db.set_setting("video_ai_base_url", base_url)
-    db.set_setting("video_ai_model", model)
-    db.set_setting("video_ai_vision", "1" if vision else "0")
+    # Never silently send an existing secret to a different service.
+    if (current["ai_key_set"] and not api_key and not clear_key and
+            (provider != current["ai_provider"] or base_url != current["ai_base_url"])):
+        raise VideoError("video_ai_new_key_required")
+    values = [("video_ai_provider", provider), ("video_ai_base_url", base_url),
+              ("video_ai_model", model), ("video_ai_vision", "1" if vision else "0")]
     if clear_key:
-        db.set_setting("video_ai_api_key", "")
+        values.append(("video_ai_api_key", ""))
     elif api_key:
-        db.set_setting("video_ai_api_key", api_key)
+        values.append(("video_ai_api_key", api_key))
+    # Keep the endpoint and its credentials in a single transaction.
+    db.executemany("INSERT INTO settings(key, value) VALUES(?, ?) "
+                   "ON CONFLICT(key) DO UPDATE SET value = excluded.value", values)
     return settings()
 
 
@@ -733,29 +745,88 @@ def build_caption(report: dict) -> str:
     return "\n\n".join(p for p in lines if p).strip()
 
 
-# ── dedicated OpenAI-compatible video analysis ──────────────────────────────
+# ── dedicated multi-provider video analysis ─────────────────────────────────
 
 
-async def _video_ai_call(messages: list[dict]) -> str:
-    key = db.get_setting("video_ai_api_key") or ""
-    if not key:
-        raise VideoError("video_ai_no_key")
-    cfg = settings()
+def _provider_request(provider: str, base_url: str, model: str, key: str,
+                      messages: list[dict]) -> tuple[str, dict, dict]:
+    """Translate internal text/image messages into the selected provider's protocol."""
+    base = base_url.rstrip("/")
+    if provider == "openai_compatible":
+        return base + "/chat/completions", {"Authorization": "Bearer " + key}, {"model": model, "messages": messages}
+    if provider not in {"gemini", "anthropic"}:
+        raise VideoError("video_ai_provider_invalid")
+    system = "\n".join(m["content"] for m in messages if m["role"] == "system")
+    converted = []
+    for message in messages:
+        if message["role"] == "system":
+            continue
+        content = message["content"]
+        parts = [{"type": "text", "text": content}] if isinstance(content, str) else content
+        blocks = []
+        for part in parts:
+            if part["type"] == "text":
+                blocks.append({"text": part["text"]} if provider == "gemini" else part)
+            elif part["type"] == "image_url":
+                url = part["image_url"]["url"]
+                prefix = "data:image/jpeg;base64,"
+                if not url.startswith(prefix):
+                    raise VideoError("video_ai_bad_image")
+                data = url[len(prefix):]
+                if provider == "gemini":
+                    blocks.append({"inline_data": {"mime_type": "image/jpeg", "data": data}})
+                else:
+                    blocks.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": data}})
+        converted.append({"role": "user" if message["role"] == "user" else ("model" if provider == "gemini" else "assistant"),
+                          "parts" if provider == "gemini" else "content": blocks})
+    if provider == "gemini":
+        payload: dict[str, Any] = {"contents": converted}
+        if system:
+            payload["system_instruction"] = {"parts": [{"text": system}]}
+        model_id = model.removeprefix("models/")
+        return base + "/models/" + quote(model_id, safe="") + ":generateContent", {"x-goog-api-key": key}, payload
+    payload = {"model": model, "max_tokens": 4096, "messages": converted}
+    if system:
+        payload["system"] = system
+    return base + "/messages", {"x-api-key": key, "anthropic-version": "2023-06-01"}, payload
+
+
+def _provider_text(provider: str, data: dict) -> str:
     try:
-        async with httpx.AsyncClient(timeout=NO_TIMEOUT, follow_redirects=False) as client:
-            response = await client.post(
-                cfg["ai_base_url"].rstrip("/") + "/chat/completions",
-                headers={"Authorization": "Bearer " + key},
-                json={"model": cfg["ai_model"], "messages": messages},
-            )
-        if response.status_code >= 400 or response.is_redirect:
-            raise VideoError(f"video_ai_http_{response.status_code}")
-        data = response.json()
-        content = data["choices"][0]["message"]["content"]
+        if provider == "openai_compatible":
+            content = data["choices"][0]["message"]["content"]
+        elif provider == "gemini":
+            parts = data["candidates"][0]["content"]["parts"]
+            content = "\n".join(p["text"] for p in parts if isinstance(p.get("text"), str) and not p.get("thought"))
+        elif provider == "anthropic":
+            content = "\n".join(p["text"] for p in data["content"] if p.get("type") == "text" and isinstance(p.get("text"), str))
+        else:
+            raise VideoError("video_ai_provider_invalid")
         if not isinstance(content, str) or not content.strip():
             raise VideoError("video_ai_bad_response")
         return content.strip()[:10000]
-    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+    except (KeyError, IndexError, TypeError, AttributeError) as exc:
+        raise VideoError("video_ai_bad_response") from exc
+
+
+async def _video_ai_call(messages: list[dict]) -> str:
+    # Read credentials and endpoint together so concurrent settings changes
+    # cannot send a previous key to a newly configured endpoint.
+    cfg = db.all_settings()
+    key = cfg.get("video_ai_api_key") or ""
+    if not key:
+        raise VideoError("video_ai_no_key")
+    provider = cfg.get("video_ai_provider") or "openai_compatible"
+    base = cfg.get("video_ai_base_url") or "https://api.openai.com/v1"
+    model = cfg.get("video_ai_model") or "gpt-4o-mini"
+    url, headers, payload = _provider_request(provider, base, model, key, messages)
+    try:
+        async with httpx.AsyncClient(timeout=NO_TIMEOUT, follow_redirects=False) as client:
+            response = await client.post(url, headers=headers, json=payload)
+        if response.status_code >= 400 or response.is_redirect:
+            raise VideoError(f"video_ai_http_{response.status_code}")
+        return _provider_text(provider, response.json())
+    except (httpx.HTTPError, ValueError) as exc:
         raise VideoError("video_ai_connection_error") from exc
 
 

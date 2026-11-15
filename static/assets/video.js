@@ -11,6 +11,12 @@ const {
   toggleEl, emptyBox, fmtDate, fmtLogTime, ICO_CHEV, state, reload, fd,
 } = window.Rozaneh;
 
+const AI_PRESETS = {
+  openai_compatible: { base: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  gemini: { base: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.5-flash' },
+  anthropic: { base: 'https://api.anthropic.com/v1', model: 'claude-sonnet-4-5' },
+};
+
 const VIDEO_SRC_KEY = {
   youtube: "video.source_youtube", vimeo: "video.source_vimeo", direct: "video.source_direct",
   page: "video.source_page", upload: "video.source_upload", unknown: "video.source_unknown",
@@ -176,6 +182,8 @@ async function renderVideo(view) {
       '<div class="vsmart-section"><div class="vsection-title"><div><b>' + h(t("video.ai_title")) + '</b><p>' + h(t("video.ai_hint")) + '</p></div>' +
         '<span class="chip ' + (cfg.ai_key_set ? 'ok' : 'warn') + '">' + h(t(cfg.ai_key_set ? 'video.key_set' : 'video.key_unset')) + '</span></div>' +
         '<form data-form="video-ai-settings" id="videoAiSettings">' +
+          field(t("video.ai_provider"), '<select name="provider" data-act="video.aiProvider">' +
+            ['openai_compatible', 'gemini', 'anthropic'].map(p => '<option value="' + p + '"' + ((cfg.ai_provider || 'openai_compatible') === p ? ' selected' : '') + '>' + h(t('video.provider_' + p)) + '</option>').join('') + '</select>', t("video.protocol_hint")) +
           field(t("video.ai_url"), '<input class="ltr" type="url" name="base_url" required dir="ltr" value="' + h(cfg.ai_base_url || 'https://api.openai.com/v1') + '">') +
           '<div class="form-grid">' +
             field(t("video.ai_model"), '<input class="ltr" type="text" name="model" required dir="ltr" value="' + h(cfg.ai_model || 'gpt-4o-mini') + '">') +
@@ -329,6 +337,13 @@ async function uploadVideo() {
       reload();
     },
     "video.refresh": async () => { await loadVideo(); await reload(); },
+    "video.aiProvider": (el) => {
+      const preset = AI_PRESETS[el.value], form = el.closest('form');
+      if (preset && form) {
+        form.elements.base_url.value = preset.base;
+        form.elements.model.value = preset.model;
+      }
+    },
     "video.aiTest": async () => {
       try { await api("/api/video/ai-test", { method: "POST" }); toast(t("video.ai_test_ok"), "ok"); }
       catch (e) { toast(errMsg(e), "err"); }
@@ -336,7 +351,7 @@ async function uploadVideo() {
     "video.aiClear": () => confirmModal(t("video.ai_clear_confirm"), async () => {
       const cfg = state.video.settings || {};
       await api("/api/video/ai-settings", { method: "PUT", body: {
-        base_url: cfg.ai_base_url, model: cfg.ai_model, vision: !!cfg.ai_vision, clear_key: true,
+        provider: cfg.ai_provider || 'openai_compatible', base_url: cfg.ai_base_url, model: cfg.ai_model, vision: !!cfg.ai_vision, clear_key: true,
       }});
       toast(t("video.ai_cleared"), "ok"); await reload();
     }),
@@ -372,7 +387,7 @@ async function uploadVideo() {
     const v = fd(form);
     try {
       const r = await api("/api/video/ai-settings", { method: "PUT", body: {
-        base_url: v.base_url, model: v.model, api_key: v.api_key || "", vision: !!form.elements.vision.checked,
+        provider: v.provider, base_url: v.base_url, model: v.model, api_key: v.api_key || "", vision: !!form.elements.vision.checked,
       }});
       state.video.settings = r.settings;
       form.elements.api_key.value = "";

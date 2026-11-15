@@ -15,7 +15,7 @@ window.fetch = async (url, init) => {
   else if (url.startsWith('/api/video/analyses')) result = {analyses: []};
   else if (url === '/api/video/ai-settings') {
     const b = JSON.parse(init.body);
-    cfg = {...cfg, ai_base_url:b.base_url, ai_model:b.model, ai_vision:b.vision, ai_key_set:b.clear_key ? false : !!b.api_key || cfg.ai_key_set};
+    cfg = {...cfg, ai_provider:b.provider, ai_base_url:b.base_url, ai_model:b.model, ai_vision:b.vision, ai_key_set:b.clear_key ? false : !!b.api_key || cfg.ai_key_set};
     result = {ok:true, settings:cfg};
   } else if (url === '/api/video/analyze') result = {ok:true, job_id:9};
   else if (url.startsWith('/api/video/upload?')) result = {ok:true, job_id:10};
@@ -61,6 +61,18 @@ const q = s => {const el = document.querySelector(s); assert.ok(el, s); return e
   await tick(); await tick();
   assert.equal(window.Rozaneh.state.video.activeJob, 10);
   assert.ok(!document.querySelector('#toasts').textContent.includes('render is not defined'));
+  const provider = q('#videoAiSettings [name="provider"]');
+  provider.value = 'gemini'; provider.dispatchEvent(new window.Event('change', {bubbles:true}));
+  assert.equal(q('#videoAiSettings [name="base_url"]').value, 'https://generativelanguage.googleapis.com/v1beta');
+  assert.equal(q('#videoAiSettings [name="model"]').value, 'gemini-2.5-flash');
+  q('#videoAiSettings [name="api_key"]').value = 'new-secret';
+  q('#videoAiSettings [type="submit"]').click();
+  await waitFor(() => cfg.ai_provider === 'gemini'); await tick();
+  const lastSettings = calls.filter(c => c.url === '/api/video/ai-settings').at(-1);
+  assert.equal(lastSettings.body.provider, 'gemini');
+  assert.equal(lastSettings.body.api_key, 'new-secret');
+  assert.equal(cfg.smart, true, 'changing provider must not disable smart mode');
+  await tick();
   console.log('video settings and quick analysis UI OK');
   dom.window.close();
 })().catch(e => {console.error(e); dom.window.close(); process.exitCode=1;});
