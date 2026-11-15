@@ -9,6 +9,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import feedparser
 import httpx
@@ -134,6 +135,92 @@ async def og_image(link: str) -> str:
     return url if url.startswith(("http://", "https://")) else ""
 
 
+class _ArticleCollector(HTMLParser):
+    """Collect article paragraphs and metadata without navigation/scripts."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.meta: dict[str, str] = {}
+        self.depth = {"article": 0, "main": 0, "skip": 0}
+        self._paragraph: list[str] | None = None
+        self._region = ""
+        self.paragraphs: dict[str, list[str]] = {"article": [], "main": []}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = {k.lower(): (v or "") for k, v in attrs}
+        if tag == "meta":
+            key = (values.get("property") or values.get("name") or "").lower()
+            if key in {*OG_KEYS, "description", "og:description", "twitter:description"}:
+                self.meta.setdefault(key, values.get("content", ""))
+        if tag in {"article", "main"}:
+            self.depth[tag] += 1
+        if tag in {"script", "style", "nav", "header", "footer", "aside", "form"}:
+            self.depth["skip"] += 1
+        if tag == "p" and not self.depth["skip"] and (self.depth["article"] or self.depth["main"]):
+            self._paragraph = []
+            self._region = "article" if self.depth["article"] else "main"
+
+    def handle_data(self, data: str) -> None:
+        if self._paragraph is not None and not self.depth["skip"]:
+            self._paragraph.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "p" and self._paragraph is not None:
+            text = clean_text(" ".join(self._paragraph), 900)
+            if len(text) >= 60:
+                self.paragraphs[self._region].append(text)
+            self._paragraph = None
+        if tag in {"article", "main"}:
+            self.depth[tag] = max(0, self.depth[tag] - 1)
+        if tag in {"script", "style", "nav", "header", "footer", "aside", "form"}:
+            self.depth["skip"] = max(0, self.depth["skip"] - 1)
+
+
+def parse_article(text: str, url: str) -> dict:
+    parser = _ArticleCollector()
+    parser.feed(text)
+    paragraphs = parser.paragraphs["article"] or parser.paragraphs["main"]
+    summary = clean_text(" ".join(paragraphs[:3]), 900)
+    if not summary:
+        summary = clean_text(parser.meta.get("og:description") or parser.meta.get("description") or
+                             parser.meta.get("twitter:description"), 900)
+    image = next((parser.meta.get(k, "") for k in OG_KEYS if parser.meta.get(k)), "")
+    image = urljoin(url, image) if image else ""
+    if urlparse(image).scheme not in {"http", "https"}:
+        image = ""
+    return {"summary": summary, "image": _upgrade_image(image)}
+
+
+async def article_details(link: str) -> dict:
+    """Best-effort, bounded download of the linked article; never invent facts."""
+    if not link.startswith(("http://", "https://")):
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(7.0), follow_redirects=True,
+                                     headers=BROWSER_HEADERS) as client:
+            async with client.stream("GET", link) as response:
+                ctype = (response.headers.get("content-type") or "").lower()
+                if response.status_code >= 400 or (ctype and "html" not in ctype):
+                    return {}
+                parts, remaining = [], 500_000
+                async for chunk in response.aiter_text(chunk_size=16384):
+                    parts.append(chunk[:remaining])
+                    remaining -= min(len(chunk), remaining)
+                    if not remaining:
+                        break
+                return parse_article("".join(parts), str(response.url))
+    except Exception:  # noqa: BLE001 — enrichment must not block publication
+        return {}
+
+
+def summary_is_useful(summary: str, title: str, min_length: int = 80) -> bool:
+    summary = clean_text(summary, 900)
+    title = clean_text(title, 900)
+    if len(summary) < min_length:
+        return False
+    return summary.casefold().strip(" .!؟") != title.casefold().strip(" .!؟")
+
+
 def parse_feed(content: bytes) -> list[dict]:
     parsed = feedparser.parse(content)
     items: list[dict] = []
@@ -143,6 +230,12 @@ def parse_feed(content: bytes) -> list[dict]:
         if not title or not link:
             continue
         summary = clean_text(entry.get("summary") or entry.get("description") or "")
+        if not summary_is_useful(summary, title):
+            for content in entry.get("content") or []:
+                candidate = clean_text((content or {}).get("value") or "")
+                if summary_is_useful(candidate, title):
+                    summary = candidate
+                    break
         items.append(
             {
                 "title": title[:400],
@@ -166,10 +259,13 @@ class _LinkCollector(HTMLParser):
         self._meta: dict[str, str] = {}
         self._in_title = False
         self._title_parts: list[str] = []
+        self._ignored_depth = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attrs_d = {k.lower(): (v or "") for k, v in attrs}
-        if tag == "a":
+        if tag in {"nav", "header", "footer", "aside"}:
+            self._ignored_depth += 1
+        if tag == "a" and not self._ignored_depth:
             href = attrs_d.get("href", "")
             if href.startswith("http") or href.startswith("/"):
                 self._href = href
@@ -194,6 +290,8 @@ class _LinkCollector(HTMLParser):
             self._title_parts.append(data)
 
     def handle_endtag(self, tag: str) -> None:
+        if tag in {"nav", "header", "footer", "aside"}:
+            self._ignored_depth = max(0, self._ignored_depth - 1)
         if tag == "a" and self._href is not None:
             text = SPACE_RE.sub(" ", " ".join(self._buffer)).strip()
             if len(text) >= 25:
@@ -209,26 +307,23 @@ class _LinkCollector(HTMLParser):
 
 
 def parse_html(content: bytes, base_url: str) -> list[dict]:
-    from urllib.parse import urljoin
-
     parser = _LinkCollector()
     try:
         parser.feed(content.decode("utf-8", errors="ignore"))
     except Exception:  # noqa: BLE001 - html.parser never raises for us, be safe
         return []
-    published = parser._meta.get("published", "")
-    iso = ""
-    if published:
-        try:
-            iso = datetime.fromisoformat(published.replace("Z", "+00:00")).astimezone(
-                timezone.utc
-            ).replace(microsecond=0).isoformat()
-        except ValueError:
-            iso = ""
     seen: set[str] = set()
     items: list[dict] = []
     for link in parser.links:
         url = urljoin(base_url, link["link"])
+        parsed = urlparse(url)
+        path = parsed.path.lower().rstrip("/")
+        # Section, tag and navigation pages are not news articles.
+        if (parsed.scheme not in {"http", "https"} or not parsed.hostname or
+                url.rstrip("/") == base_url.rstrip("/") or
+                re.search(r"/(?:tag|tags|category|categories|topic|topics|author|authors|search)(?:/|$)", path) or
+                re.search(r"\.(?:jpg|jpeg|png|webp|gif|pdf|mp4)$", path)):
+            continue
         if url in seen:
             continue
         seen.add(url)
@@ -237,8 +332,10 @@ def parse_html(content: bytes, base_url: str) -> list[dict]:
                 "title": link["title"][:400],
                 "link": url,
                 "summary": "",
-                "image": parser._meta.get("image", ""),
-                "published": iso,
+                # The listing's social image/date belongs to the listing, not
+                # every story on it; enrich each linked article separately.
+                "image": "",
+                "published": "",
             }
         )
         if len(items) >= 40:
