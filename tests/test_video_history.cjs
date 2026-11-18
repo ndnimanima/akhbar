@@ -10,8 +10,7 @@ const job = {id:17,status:'done',stage:'done',mode:'manual',title:'A report',cre
 window.fetch=async(url)=>{
  let data;
  if (url==='/api/meta') data={authenticated:true,defaults:{},platforms:[]};
- else if (url==='/api/video/status') data={settings:{},ffmpeg:true};
- else if (url.startsWith('/api/video/analyses')) {historyLoads++;data={analyses:[job]};}
+ else if (url.startsWith('/api/video/snapshot')) {historyLoads++;data={status:{settings:{},ffmpeg:true},analyses:[job]};}
  else throw Error('Unexpected request '+url);
  return {ok:true,status:200,json:async()=>data};
 };
@@ -31,5 +30,8 @@ async function waitFor(f) {for(let i=0;i<100;i++){if(f())return;await tick()}thr
  assert.equal(button().getAttribute('aria-expanded'),'false');
  assert.equal(document.querySelector('.vjob-body'),null);
  assert.equal(scrolls,before);assert.equal(historyLoads,loads);
+ document.querySelector('[data-act="video.refresh"]').click();
+ await waitFor(()=>historyLoads>loads); await tick();
+ assert.equal(historyLoads,loads+1, 'refresh requires only one snapshot');
  console.log('video history opens in place'); dom.window.close();
 })().catch(e=>{console.error(e);dom.window.close();process.exitCode=1});

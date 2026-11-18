@@ -19,8 +19,7 @@ window.fetch = async (url, init) => {
   calls.push({url, method: init.method, body: typeof init.body === 'string' ? JSON.parse(init.body) : init.body});
   let result = {};
   if (url === '/api/meta') result = {authenticated: true, defaults: {}, platforms: []};
-  else if (url === '/api/video/status') result = {settings: cfg, ffmpeg: true};
-  else if (url.startsWith('/api/video/analyses')) result = {analyses: []};
+  else if (url.startsWith('/api/video/snapshot')) result = {status:{settings:cfg, ffmpeg:true}, analyses:[]};
   else if (url === '/api/video/ai-settings') {
     const b = JSON.parse(init.body);
     cfg = {...cfg, ai_provider:b.provider, ai_base_url:b.base_url, ai_model:b.model, ai_vision:b.vision, ai_key_set:b.clear_key ? false : !!b.api_key || cfg.ai_key_set};

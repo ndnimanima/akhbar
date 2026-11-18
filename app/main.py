@@ -1319,6 +1319,12 @@ async def video_status(_: None = auth) -> dict:
     return video_mod.status()
 
 
+@app.get("/api/video/snapshot")
+async def video_snapshot(limit: int = 30, brief: bool = False, _: None = auth) -> dict:
+    """Status and history in one request; brief history omits large reports."""
+    return {"status": video_mod.status(), "analyses": video_mod.list_jobs(limit, brief=brief)}
+
+
 @app.get("/api/video/settings")
 async def video_settings(_: None = auth) -> dict:
     return {"settings": video_mod.settings()}

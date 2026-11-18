@@ -368,11 +368,18 @@ def new_token(nbytes: int = 32) -> str:
 
 
 def log(job_id: int | None, message: str, level: str = "info", code: str = "") -> None:
-    execute(
-        "INSERT INTO logs(job_id, level, message, code, created_at) VALUES(?,?,?,?,?)",
-        (job_id, level, message[:2000], code[:60], now_iso()),
-    )
-    execute("DELETE FROM logs WHERE id NOT IN (SELECT id FROM logs ORDER BY id DESC LIMIT 3000)")
+    # Insert and retention share a transaction. Delete a primary-key range
+    # instead of scanning the table with NOT IN for every log entry.
+    with _LOCK:
+        conn = get_conn()
+        with conn:
+            conn.execute(
+                "INSERT INTO logs(job_id, level, message, code, created_at) VALUES(?,?,?,?,?)",
+                (job_id, level, message[:2000], code[:60], now_iso()),
+            )
+            conn.execute(
+                "DELETE FROM logs WHERE id < (SELECT id FROM logs ORDER BY id DESC LIMIT 1 OFFSET 2999)"
+            )
 
 
 def translate_cache_get(key: str) -> str | None:

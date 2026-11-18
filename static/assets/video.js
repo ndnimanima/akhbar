@@ -227,15 +227,22 @@ async function renderVideo(view) {
   if (file) file.addEventListener("change", () => uploadVideo());
 }
 
+let videoLoadVersion = 0;
+
 async function loadVideo() {
-  const [st, jobs] = await Promise.all([api("/api/video/status"), api("/api/video/analyses?limit=30")]);
+  videoLoadVersion += 1;
+  const jobs = await api("/api/video/snapshot?limit=30");
+  const st = jobs.status;
   state.video.status = st;
   state.video.settings = st.settings || {};
   state.video.jobs = jobs.analyses || [];
 }
 
 async function pollVideoData() {
-  const [st, jobs] = await Promise.all([api("/api/video/status"), api("/api/video/analyses?limit=30&brief=true")]);
+  const version = videoLoadVersion;
+  const jobs = await api("/api/video/snapshot?limit=30&brief=true");
+  const st = jobs.status;
+  if (state.route !== "video" || version !== videoLoadVersion) return false;
   const previous = new Map((state.video.jobs || []).map((j) => [j.id, j]));
   const rows = await Promise.all((jobs.analyses || []).map(async (j) => {
     const old = previous.get(j.id);
@@ -244,9 +251,11 @@ async function pollVideoData() {
     }
     return { ...j, report: old && old.status === j.status ? old.report : {} };
   }));
+  if (state.route !== "video" || version !== videoLoadVersion) return false;
   state.video.status = st;
   state.video.settings = st.settings || {};
   state.video.jobs = rows;
+  return true;
 }
 
 function pollVideo() {
@@ -258,7 +267,10 @@ function pollVideo() {
     busy = true;
     try {
       const before = (state.video.jobs || []).filter((j) => j.status === "running").length;
-      await pollVideoData();
+      if (!await pollVideoData()) {
+        if (state.route !== "video") { clearInterval(state.video.polling); state.video.polling = null; }
+        return;
+      }
       // Only touch the DOM when the markup really changed — otherwise a
       // click could land on a node that is being replaced mid-interaction.
       const history = $("#videoHistoryBody");
@@ -274,9 +286,9 @@ function pollVideo() {
         progBox.dataset.sig = progHtml;
       }
       const running = (state.video.jobs || []).filter((j) => j.status === "running").length;
-      if (!running && before) {
+      if (!running) {
         clearInterval(state.video.polling); state.video.polling = null;
-        toast(t("video.status_done"), "ok");
+        if (before) toast(t("video.status_done"), "ok");
       }
       misses = 0;
     } catch (e) {
@@ -371,7 +383,7 @@ async function uploadVideo() {
       const history = $("#videoHistoryBody");
       if (history) { const html = videoJobsHtml(); history.innerHTML = html; history.dataset.sig = html; }
     },
-    "video.refresh": async () => { await loadVideo(); await reload(); },
+    "video.refresh": async () => { await reload(); },
     "video.aiProvider": (el) => {
       const preset = AI_PRESETS[el.value], form = el.closest('form');
       if (preset && form) {
@@ -394,13 +406,13 @@ async function uploadVideo() {
       try {
         await api("/api/video/cancel/" + el.dataset.id, { method: "POST" });
         toast(t("video.cancel"), "ok");
-        await loadVideo(); await reload();
+        await reload();
       } catch (e) { toast(errMsg(e), "err"); }
     },
     "video.delete": async (el) => {
       confirmModal(t("video.delete") + "؟", async () => {
         await api("/api/video/analyses/" + el.dataset.id, { method: "DELETE" });
-        await loadVideo(); await reload();
+        await reload();
       });
     },
     "video.pick": () => { const f = $("#videoFile"); if (f && !uploadRequest) f.click(); },
