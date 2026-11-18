@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import calendar
+import copy
 import hashlib
 import html as html_lib
+import json
+from collections import OrderedDict
 import re
+import threading
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from typing import Any
@@ -343,8 +348,39 @@ def parse_html(content: bytes, base_url: str) -> list[dict]:
     return items
 
 
-async def fetch_source(feed: dict) -> list[dict]:
-    """Download a source and return normalized items (newest first when dated)."""
+# Small process-local cache, used only after the origin confirms a 304. It is
+# deliberately bounded and contains no disk state; errors never fall back to it.
+_FEED_CACHE: OrderedDict[str, tuple[str, str, bytes]] = OrderedDict()
+_FEED_CACHE_LOCK = threading.Lock()
+_FEED_CACHE_ENTRIES = 16
+_FEED_CACHE_ITEM_BYTES = 128 * 1024
+
+
+def _remember_source(url: str, response: httpx.Response, items: list[dict]) -> None:
+    controls = (response.headers.get("cache-control") or "").lower()
+    vary = {part.strip().lower() for part in response.headers.get("vary", "").split(",") if part.strip()}
+    etag = response.headers.get("etag", "")
+    modified = response.headers.get("last-modified", "")
+    if (response.status_code != 200 or response.history or len(url) > 4096 or
+            "no-store" in controls or "private" in controls or response.headers.get("set-cookie") or
+            vary - {"user-agent", "accept", "accept-language", "accept-encoding"} or
+            (not etag and not modified) or len(etag) > 1024 or len(modified) > 128):
+        return
+    # Avoid serializing an oversized source just to discover it cannot fit.
+    if sum(len(value) for item in items for value in item.values() if isinstance(value, str)) > _FEED_CACHE_ITEM_BYTES:
+        return
+    data = json.dumps(items, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(data) > _FEED_CACHE_ITEM_BYTES:
+        return
+    with _FEED_CACHE_LOCK:
+        _FEED_CACHE[url] = (etag, modified, data)
+        _FEED_CACHE.move_to_end(url)
+        while len(_FEED_CACHE) > _FEED_CACHE_ENTRIES:
+            _FEED_CACHE.popitem(last=False)
+
+
+async def _fetch_source(feed: dict) -> list[dict]:
+    """Download and normalize one source, conditionally when possible."""
     url = (feed.get("url") or "").strip()
     if not url:
         raise FeedError("لینک منبع خالی است")
@@ -353,14 +389,42 @@ async def fetch_source(feed: dict) -> list[dict]:
         "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.8, */*;q=0.5",
         "Accept-Language": "fa,en;q=0.8",
     }
+    with _FEED_CACHE_LOCK:
+        cached = _FEED_CACHE.get(url)
+        if cached:
+            _FEED_CACHE.move_to_end(url)
     try:
         async with httpx.AsyncClient(
             timeout=config.HTTP_TIMEOUT, follow_redirects=True, headers=headers
         ) as client:
-            response = await client.get(url)
+            if cached:
+                etag, modified, data = cached
+                conditional = {}
+                if etag:
+                    conditional["If-None-Match"] = etag
+                if modified:
+                    conditional["If-Modified-Since"] = modified
+                # Do not forward validators to a new redirect target.
+                response = await client.get(url, headers=conditional, follow_redirects=False)
+                if response.status_code == 304:
+                    controls = response.headers.get("cache-control", "").lower()
+                    vary = {part.strip().lower() for part in response.headers.get("vary", "").split(",") if part.strip()}
+                    if ("no-store" in controls or "private" in controls or response.headers.get("set-cookie") or
+                            vary - {"user-agent", "accept", "accept-language", "accept-encoding"}):
+                        with _FEED_CACHE_LOCK:
+                            if _FEED_CACHE.get(url) == cached:
+                                _FEED_CACHE.pop(url, None)
+                    return json.loads(data)
+                if response.is_redirect:
+                    response = await client.get(url)
+            else:
+                response = await client.get(url)
     except httpx.HTTPError as exc:
         raise FeedError(f"خطا در دریافت منبع: {exc.__class__.__name__}") from exc
 
+    with _FEED_CACHE_LOCK:
+        if cached and _FEED_CACHE.get(url) == cached:
+            _FEED_CACHE.pop(url, None)
     if response.status_code >= 400:
         raise FeedError(f"منبع کد {response.status_code} برگرداند")
 
@@ -375,7 +439,39 @@ async def fetch_source(feed: dict) -> list[dict]:
         raise FeedError("هیچ خبری در این منبع پیدا نشد (RSS یا HTML قابل خواندن نبود)")
 
     items.sort(key=published_sort_key, reverse=True)
+    _remember_source(url, response, items)
     return items
+
+
+# Share only overlapping requests for the exact same URL and event loop. No
+# completed result is reused here, so a later manual check always revalidates.
+_FEED_IN_FLIGHT: dict[tuple[asyncio.AbstractEventLoop, str], dict] = {}
+
+
+async def fetch_source(feed: dict) -> list[dict]:
+    """Get fresh source items, coalescing simultaneous identical checks."""
+    url = (feed.get("url") or "").strip()
+    key = (asyncio.get_running_loop(), url)
+    entry = _FEED_IN_FLIGHT.get(key)
+    if entry is None or entry["task"].done():
+        task = asyncio.create_task(_fetch_source({"url": url}))
+        # Retrieve errors even if every caller cancels before the task finishes.
+        def observe(done: asyncio.Task) -> None:
+            if not done.cancelled():
+                done.exception()
+        task.add_done_callback(observe)
+        entry = {"task": task, "waiters": 0}
+        _FEED_IN_FLIGHT[key] = entry
+    entry["waiters"] += 1
+    try:
+        return copy.deepcopy(await asyncio.shield(entry["task"]))
+    finally:
+        entry["waiters"] -= 1
+        if not entry["waiters"]:
+            if _FEED_IN_FLIGHT.get(key) is entry:
+                _FEED_IN_FLIGHT.pop(key, None)
+            if not entry["task"].done():
+                entry["task"].cancel()
 
 
 def item_hash(feed_url: str, item: dict) -> str:

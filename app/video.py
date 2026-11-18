@@ -86,17 +86,25 @@ class VideoError(RuntimeError):
 
 
 def settings() -> dict:
+    # Read all video settings in one consistent snapshot, without loading
+    # unrelated settings or exposing the API key itself.
+    values = {row["key"]: row["value"] for row in db.query(
+        "SELECT key, value FROM settings WHERE key IN (?,?,?,?,?,?,?,?,?,?)",
+        ("video_smart", "video_interval_minutes", "video_summarize", "video_frames",
+         "video_smart_last_run", "video_ai_provider", "video_ai_base_url", "video_ai_model",
+         "video_ai_api_key", "video_ai_vision"),
+    )}
     return {
-        "smart": (db.get_setting("video_smart") or "0") == "1",
-        "interval_minutes": int(db.get_setting("video_interval_minutes") or "30"),
-        "summarize": (db.get_setting("video_summarize") or "1") == "1",
-        "frames": (db.get_setting("video_frames") or "1") == "1",
-        "last_smart_run": db.get_setting("video_smart_last_run") or "",
-        "ai_provider": db.get_setting("video_ai_provider") or "openai_compatible",
-        "ai_base_url": db.get_setting("video_ai_base_url") or "https://api.openai.com/v1",
-        "ai_model": db.get_setting("video_ai_model") or "gpt-4o-mini",
-        "ai_key_set": bool(db.get_setting("video_ai_api_key")),
-        "ai_vision": (db.get_setting("video_ai_vision") or "0") == "1",
+        "smart": (values.get("video_smart") or "0") == "1",
+        "interval_minutes": int(values.get("video_interval_minutes") or "30"),
+        "summarize": (values.get("video_summarize") or "1") == "1",
+        "frames": (values.get("video_frames") or "1") == "1",
+        "last_smart_run": values.get("video_smart_last_run") or "",
+        "ai_provider": values.get("video_ai_provider") or "openai_compatible",
+        "ai_base_url": values.get("video_ai_base_url") or "https://api.openai.com/v1",
+        "ai_model": values.get("video_ai_model") or "gpt-4o-mini",
+        "ai_key_set": bool(values.get("video_ai_api_key")),
+        "ai_vision": (values.get("video_ai_vision") or "0") == "1",
     }
 
 
@@ -156,11 +164,11 @@ def ffmpeg_available() -> bool:
 
 def status() -> dict:
     running = [i for i, t in _TASKS.items() if not t.done()]
-    total = int((db.query_one("SELECT COUNT(*) AS c FROM video_analyses") or {}).get("c") or 0)
-    done = int(
-        (db.query_one("SELECT COUNT(*) AS c FROM video_analyses WHERE status='done'") or {}).get("c")
-        or 0
-    )
+    counts = db.query_one(
+        "SELECT COUNT(*) AS total, COUNT(CASE WHEN status='done' THEN 1 END) AS done FROM video_analyses"
+    ) or {}
+    total = int(counts.get("total") or 0)
+    done = int(counts.get("done") or 0)
     return {"settings": settings(), "running": running, "ffmpeg": ffmpeg_available(),
             "total": total, "done": done}
 
@@ -1255,6 +1263,10 @@ def pending_video_urls(limit: int = SMART_BATCH) -> list[dict]:
 
 async def maybe_smart_tick() -> list[int]:
     """Called from the scheduler tick. No-op unless smart mode is ON."""
+    # Avoid reading AI configuration and the rest of the settings on every
+    # scheduler tick when smart mode is disabled (the default).
+    if (db.get_setting("video_smart") or "0") != "1":
+        return []
     cfg = settings()
     if not cfg["smart"]:
         return []

@@ -133,15 +133,25 @@ def _visual_fingerprint(data: bytes) -> tuple[str, str]:
         return "", ""
 
 
+def _image_url_seen(destination_id: int, image_url: str) -> bool:
+    """Known URL duplicates do not need to be downloaded again."""
+    if db.query_one("SELECT 1 AS found FROM published_images WHERE destination_id=? AND image_url_hash=? LIMIT 1",
+                    (destination_id, _image_hash(image_url))):
+        return True
+    # Older versions recorded successful destinations on the item instead.
+    rows = db.query("SELECT destinations FROM items WHERE status='sent' AND image=? ORDER BY id DESC LIMIT 50", (image_url,))
+    return any(any(str(d.get("id")) == str(destination_id) and d.get("ok")
+                   for d in db.load_list(row.get("destinations")) if isinstance(d, dict)) for row in rows)
+
+
 def _image_seen(destination_id: int, image_url: str, data_hash: str,
-                visual_hash: str = "", visual_color: str = "") -> bool:
-    url_hash = _image_hash(image_url)
-    row = db.query_one(
-        "SELECT 1 AS found FROM published_images WHERE destination_id = ? AND "
-        "(image_url_hash = ? OR (image_data_hash != '' AND image_data_hash = ?)) LIMIT 1",
-        (destination_id, url_hash, data_hash),
-    )
-    if row:
+                visual_hash: str = "", visual_color: str = "", *, url_checked: bool = False) -> bool:
+    if not url_checked and _image_url_seen(destination_id, image_url):
+        return True
+    if data_hash and db.query_one(
+        "SELECT 1 AS found FROM published_images WHERE destination_id = ? AND image_data_hash != '' AND image_data_hash = ? LIMIT 1",
+        (destination_id, data_hash),
+    ):
         return True
     if visual_hash and visual_color:
         recent = db.query("SELECT visual_hash, visual_color FROM published_images "
@@ -156,11 +166,7 @@ def _image_seen(destination_id: int, image_url: str, data_hash: str,
                     return True
             except (ValueError, TypeError):
                 continue
-    # Previous releases recorded the URL and successful destinations, but not
-    # whether the photo or a text fallback succeeded. Be conservative on upgrade.
-    rows = db.query("SELECT destinations FROM items WHERE status='sent' AND image=? ORDER BY id DESC LIMIT 50", (image_url,))
-    return any(any(str(d.get("id")) == str(destination_id) and d.get("ok")
-                   for d in db.load_list(row.get("destinations")) if isinstance(d, dict)) for row in rows)
+    return False
 
 
 def _remember_image(destination_id: int, image_url: str, data_hash: str,
@@ -170,11 +176,12 @@ def _remember_image(destination_id: int, image_url: str, data_hash: str,
 
 
 async def _deliver_item(destination: dict, item: dict, image, image_digest: str,
-                        visual_hash: str = "", visual_color: str = "") -> tuple[bool, str, bool, bool]:
+                        visual_hash: str = "", visual_color: str = "", *,
+                        known_repeated: bool = False, url_checked: bool = False) -> tuple[bool, str, bool, bool]:
     """Send exactly one post when delivery is certain; repeated photos become text."""
     platform = (destination.get("platform") or "").lower()
     can_photo = bool(image and item.get("image") and publish.supports_photo(platform))
-    repeated = can_photo and _image_seen(destination["id"], item["image"], image_digest, visual_hash, visual_color)
+    repeated = known_repeated or (can_photo and _image_seen(destination["id"], item["image"], image_digest, visual_hash, visual_color, url_checked=url_checked))
     if can_photo and not repeated:
         ok, detail = await publish.send_photo(destination, item["image"],
                                               publish.render_caption(item, destination), image=image)
@@ -436,7 +443,8 @@ async def run_job(
                     continue
                 platform = (destination.get("platform") or "").lower()
                 use_photo = send_image and bool(item.get("image")) and publish.supports_photo(platform)
-                if use_photo and not image_checked:
+                known_repeated = use_photo and _image_url_seen(destination["id"], item["image"])
+                if use_photo and not known_repeated and not image_checked:
                     image_checked = True
                     image = await publish.fetch_image(item["image"])
                     if image:
@@ -444,7 +452,8 @@ async def run_job(
                         visual_hash, visual_color = await asyncio.to_thread(_visual_fingerprint, image[0])
                 # An unavailable or duplicate image becomes one text post.
                 ok, detail, photo_sent, repeated = await _deliver_item(
-                    destination, item, image if use_photo else None, image_digest, visual_hash, visual_color
+                    destination, item, image if use_photo else None, image_digest, visual_hash, visual_color,
+                    known_repeated=known_repeated, url_checked=use_photo
                 )
                 if photo_sent:
                     report["images"] += 1
@@ -533,11 +542,19 @@ async def _resend_item(item_id: int, destination_ids: list[int] | None = None) -
     if not destinations:
         return {"ok": False, "error_code": "no_destinations"}
     results = []
-    image = await publish.fetch_image(item["image"]) if item.get("image") else None
-    image_digest = hashlib.sha256(image[0]).hexdigest() if image else ""
-    visual_hash, visual_color = await asyncio.to_thread(_visual_fingerprint, image[0]) if image else ("", "")
+    image, image_digest, visual_hash, visual_color = None, "", "", ""
+    image_checked = False
     for destination in destinations:
-        ok, detail, _, _ = await _deliver_item(destination, item, image, image_digest, visual_hash, visual_color)
+        use_photo = bool(item.get("image")) and publish.supports_photo(destination.get("platform") or "")
+        known_repeated = use_photo and _image_url_seen(destination["id"], item["image"])
+        if use_photo and not known_repeated and not image_checked:
+            image_checked = True
+            image = await publish.fetch_image(item["image"])
+            if image:
+                image_digest = hashlib.sha256(image[0]).hexdigest()
+                visual_hash, visual_color = await asyncio.to_thread(_visual_fingerprint, image[0])
+        ok, detail, _, _ = await _deliver_item(destination, item, image if use_photo else None,
+                                               image_digest, visual_hash, visual_color, known_repeated=known_repeated, url_checked=use_photo)
         results.append(
             {"id": destination["id"], "name": destination.get("name"), "ok": ok, "detail": detail}
         )
